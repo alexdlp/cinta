@@ -1,0 +1,38 @@
+[project]
+name = "cinta"
+version = "0.1.0"
+description = "Record, download and transcribe audio and video from the command line"
+authors = [
+    { name = "alexdlp", email = "alexdlp.dlp@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = []
+
+# No [build-system] on purpose (DESIGN.md 7.2): uv treats the project as
+# virtual, `uv sync` works and there is no backend to maintain. flit_core goes in
+# the day we package for Homebrew, not before.
+
+[tool.uv]
+# uv-managed interpreters only: neither miniconda nor brew gets picked up (7.6).
+python-preference = "only-managed"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "integration: uses real external tools (ffmpeg, whisper-cli); outside the fast loop",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
