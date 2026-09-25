@@ -1,14 +1,19 @@
-# No [build-system] yet (DESIGN.md 7.2): the package is not installed into the
-# venv, so src/ has to be on the PYTHONPATH to run it.
-PY := PYTHONPATH=src uv run
+SWIFT_PKG := swift/cintarec
 
-.PHONY: run test fmt
+.PHONY: help build-swift test fmt
 
-run:
-	$(PY) python -m cinta $(ARGS)
+help:
+	@echo "uv run cinta ...   run the CLI, e.g. uv run cinta devices"
+	@echo
+	@echo "make build-swift   build the screen recorder (needed once)"
+	@echo "make test          run the tests"
+	@echo "make fmt           format and autofix"
+
+build-swift:
+	@swift build -c release --package-path $(SWIFT_PKG) 2>&1 | grep -v "search path" || true
 
 test:
-	$(PY) pytest
+	uv run pytest
 
 fmt:
 	uv run ruff format

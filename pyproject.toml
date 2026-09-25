@@ -8,9 +8,14 @@ authors = [
 requires-python = ">=3.11"
 dependencies = []
 
-# No [build-system] on purpose (DESIGN.md 7.2): uv treats the project as
-# virtual, `uv sync` works and there is no backend to maintain. flit_core goes in
-# the day we package for Homebrew, not before.
+[project.scripts]
+cinta = "cinta.cli:main"
+
+# flit_core has no transitive dependencies, which is what keeps the Homebrew
+# formula down to a single resource (DESIGN.md 7.2).
+[build-system]
+requires = ["flit_core>=3.9,<4"]
+build-backend = "flit_core.buildapi"
 
 [tool.uv]
 # uv-managed interpreters only: neither miniconda nor brew gets picked up (7.6).
@@ -25,7 +30,6 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
 markers = [
     "integration: uses real external tools (ffmpeg, whisper-cli); outside the fast loop",
 ]
