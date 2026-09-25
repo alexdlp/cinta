@@ -15,8 +15,9 @@ There are two ways in and one way out:
 | **As text** | `cinta transcribe <url>`<br>`cinta batch <files>` | A transcript of anything above, or of media you already have |
 
 ```bash
-cinta download "https://youtu.be/VIDEO" --type video   # a video file on your Desktop
-cinta record 300 --audio both                          # 5 minutes of screen + system + mic
+cinta download "https://youtu.be/VIDEO" --type video   # a video file in ~/cinta
+cinta devices                                          # what you can record from
+cinta record --display 'Mi Monitor' 5m                 # 5 minutes of screen + system audio
 cinta transcribe "https://youtu.be/VIDEO"              # download it and write the transcript
 cinta batch ~/lectures/*.mp4                           # transcribe a folder you already have
 cinta models download large-v3                         # fetch the transcription model
@@ -38,11 +39,11 @@ The project language is English: code, comments, docs, commit messages and user-
 
 ```bash
 uv sync                    # creates .venv with the uv-managed CPython 3.13
+make build-swift           # builds the screen recorder (once)
+uv run cinta devices       # run the CLI
 make test                  # pytest
 make fmt                   # ruff format + ruff check --fix
-make run ARGS="--help"     # run the CLI
 ```
 
-There is no `[build-system]` in `pyproject.toml` yet, on purpose ([DESIGN.md §7.2](DESIGN.md)),
-which is why the CLI is run through `make run` rather than `uv run` — the `Makefile` puts `src/`
-on the `PYTHONPATH`.
+`uv tool install --editable .` puts `cinta` on your PATH if you would rather not type
+`uv run` every time.

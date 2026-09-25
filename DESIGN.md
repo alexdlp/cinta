@@ -82,15 +82,17 @@ cinta/
 ├── DESIGN.md                   # this document
 ├── CHANGELOG.md
 ├── LICENSE                     # MIT
-├── Makefile                    # make run / test / fmt
+├── Makefile                    # make build-swift / test / fmt
 ├── src/cinta/
 │   ├── __init__.py             # __version__
 │   ├── cli.py                  # root parser + subcommand dispatch
 │   ├── config.py               # XDG paths, config.toml, environment variables
+│   ├── duration.py             # '30s' / '5m' / '1h30m' -> seconds
 │   ├── errors.py               # CintaError -> exit codes
 │   ├── external.py             # THE ONLY place that spawns subprocesses
 │   ├── ui.py                   # progress, colors, --json/--quiet modes
 │   ├── commands/
+│   │   ├── devices.py
 │   │   ├── download.py
 │   │   ├── transcribe.py
 │   │   ├── batch.py
@@ -136,6 +138,7 @@ A single entry point. `pyproject.toml` declares `cinta = "cinta.cli:main"`.
 ```
 cinta [--json] [--quiet] [-v] <subcommand> ...
 
+  devices                  List screens and microphones
   download    URL          Download audio or video
   transcribe  URL          Download and transcribe
   batch       [PATHS...]   Transcribe local files
@@ -143,6 +146,58 @@ cinta [--json] [--quiet] [-v] <subcommand> ...
   models      <action>     Manage Whisper models
   version
 ```
+
+**Durations always carry a unit**: `30s`, `5m`, `1h30m`. A bare number is refused rather than
+interpreted. The two plausible readings of `15` are sixty times apart, and a duration is only
+ever typed when the recording is about to be left unattended, so the error names both spellings
+instead of guessing. The unit is parsed once in `duration.py` and every command that takes a
+length of time uses it.
+
+### 4.0 Where output goes and what it is called
+
+**One destination directory for everything the tool produces: `~/cinta/`, flat.**
+
+The reason it is not split by file type is that a single run produces several files.
+`cinta transcribe URL` writes the media, the `.txt` and the `.srt`; `cinta record` may later
+write a `.mov` plus a sidecar. Sending video to `~/Movies`, audio to `~/Music` and text to
+`~/Documents` would tear one job's results across three folders. They share a filename stem
+instead, which keeps them adjacent in any sorted listing. `~/Desktop` is rejected for the
+obvious reason: screen recordings run about 15 MB per minute and the desktop is visible.
+
+Resolution order for the destination:
+
+1. `--output FILE` — an exact path. Only for commands that produce exactly one file.
+2. `--output-dir DIR`
+3. `$CINTA_OUTPUT_DIR`
+4. `output_dir` in `~/.config/cinta/config.toml`
+5. `~/cinta/`, created on first use.
+
+Naming contract:
+
+| Command | Produces | Name |
+|---|---|---|
+| `download --type audio` | `.mp3` | `<title>.mp3`, the title from yt-dlp, sanitized |
+| `download --type video` | `.mp4` / `.mkv` | `<title>.<ext>` |
+| `record` | `.mov` | `<YYYY-MM-DD>-<HHMMSS>-<display>.mov` |
+| `transcribe` | media + `.txt` + `.srt` | the media's stem, reused for the sidecars |
+| `batch` | `.txt` + `.srt` per input | the input's stem |
+
+Rules that apply to all of them:
+
+- **Date first** in generated names, so `ls` sorts chronologically.
+- **Sanitization**: no `/`, no leading dots, whitespace collapsed, trailing dots and spaces
+  trimmed (they break on other filesystems).
+- **Never overwrite silently.** An existing destination is an error (exit code 13) unless
+  `--force` is given.
+- One job's outputs **share a stem**. That is the whole organizing principle; there are no
+  per-type subdirectories, and no per-job subdirectory either — a folder holding a single
+  `.mp3` is worse than a flat listing.
+
+Open question: `batch` takes local files as input, and today's `whisper_here` writes next to
+them (`./transcripciones`). Writing those transcripts to `~/cinta/` instead means transcribing
+`~/lectures/*.mp4` scatters the results away from the videos. Leaning towards: `batch` defaults
+to writing beside each input file, because there the user already chose a location. To be
+confirmed when `batch` is implemented.
 
 ### 4.1 `cinta download`
 
@@ -197,14 +252,34 @@ if there was any failure.
 ```
 cinta record [DURATION] [--output FILE | --output-dir DIR]
           [--audio system|mic|both|none]   (default: system)
-          [--display N] [--app BUNDLE_ID] [--window ID]
+          [--display N|id:N] [--mic N|id:UID] [--app BUNDLE_ID] [--window ID]
           [--fps 30] [--scale 1] [--no-cursor] [--codec h264|hevc]
           [--list] [--json]
 ```
 
-- With no `DURATION` it records until `Ctrl-C` (today it is mandatory, because of how OBS is
-  driven).
-- `--list` prints capturable displays, windows and apps as JSON, so a target can be chosen.
+- With no `DURATION` it records until you **press Enter**. `Ctrl-C` also works and is equally
+  safe, but asking someone to interrupt a process in order to end a recording normally is the
+  wrong shape: interrupting should be the escape hatch, not the interface. `cintarec` watches
+  stdin for this, and only when stdin is a terminal — piped input reaches EOF immediately, and
+  treating that as a stop would end every scripted recording the instant it began.
+- Listing capturable targets is **not** a flag of `record`: it is `cinta devices`, a top-level
+  command. Screens and microphones are not the property of recording — anything else that
+  captures will want them too — and a flag buried inside a subcommand is not where anyone looks
+  for "what do I have". `cinta devices` shows screens and microphones, and nothing else.
+  `cintarec --list` still emits windows and applications as JSON, and `cinta devices --json`
+  passes them through, but the human listing omits them: recording a single window is not
+  implemented, so showing dozens of windows would be offering targets that cannot be used. The
+  listing comes back when `--window` and `--app` do.
+- **Which display gets recorded.** One `SCStream` captures exactly one display: there is no
+  "record everything". The default is the main display (`CGMainDisplayID()`, the one holding
+  the menu bar), which is what `screencapture` does and the most predictable choice. It is a
+  default, not a limitation — the development machine has three displays and the main one is
+  the laptop panel, which is rarely the one being recorded. `--display 2` is the 1-based index
+  from `cinta devices` (screens ordered left to right by desktop arrangement); `--display id:2`
+  is the raw display id. The two spellings are deliberately different because they collide in
+  practice: on the development machine index 1 and id 1 are different screens. Indices are
+  renumbered when a monitor is plugged in, ids are not. Names come from
+  `NSScreen.localizedName`; `SCDisplay` does not carry one.
 - It fully replaces `record_screen`: OBS, `obsws-python`, `tqdm`, port 4455 and the hardcoded
   password all go away.
 
@@ -267,7 +342,7 @@ main.swift
                   → Recorder(stream) ──┬─ .screen  → Writer.videoInput
                                        ├─ .audio   → Writer.systemAudioInput
                                        └─ mic (AVCaptureSession) → Writer.micInput
-                  → wait for: duration | SIGINT | EOF on stdin
+                  → wait for: duration | Enter or EOF on stdin | SIGINT
                   → Writer.finish() → Report.emit() → JSON to stdout
 ```
 
@@ -280,10 +355,33 @@ Key pieces and their traps:
   resolution on a Retina display).
 - **Dropping empty frames**: ScreenCaptureKit delivers sample buffers with
   `SCStreamFrameInfo.status != .complete` when the screen has not changed. They must be
-  filtered out or the video ends up with inflated duration and black frames.
+  filtered out or the video ends up with inflated duration and black frames. A consequence
+  worth stating: the output is **variable frame rate**, and `--fps` is a ceiling rather than a
+  guarantee. A 5 s capture of a mostly static screen measured 109 frames, not 150. Duration and
+  A/V sync are correct because they come from the real presentation timestamps.
+- **Colour space**: ScreenCaptureKit hands over frames in the *display's* colour space. The
+  built-in XDR panel is Display P3, so leaving this unset produced files holding P3 pixel
+  values while the container declared Rec.709 — every player then read those numbers as
+  different colours, which looks like a strange cast over the whole picture. Verified against a
+  `screencapture` reference: the raw pixel values of the recording were identical to the P3
+  screenshot, i.e. no conversion had happened. `colorSpaceName = CGColorSpace.sRGB` makes
+  ScreenCaptureKit convert, and the writer states Rec.709 explicitly instead of letting it be
+  inferred. Wide-gamut capture (P3 in, P3 tagged) is the alternative; sRGB is chosen because it
+  is correct in every player, consistent with `--compatible` elsewhere in the project.
+
+  Worth knowing for the inevitable "the colours look wrong" report: **screen filters are not
+  recorded**. Night Shift and True Tone are applied after the framebuffer, so they tint what
+  the user sees but never reach the capture. A recording made with Night Shift on will look
+  colder than the screen it came from, and that is correct behaviour, not a bug. It produces
+  exactly the same complaint as a real colour-space mismatch, so the first question to ask is
+  whether a filter is on.
 - **`AVAssetWriter`**: `.mov` container, H.264 video (or HEVC with `--codec hevc`), AAC audio.
   The first sample buffer sets `startSessionAtSourceTime`; video and audio share that timeline
   or they drift apart.
+- **Nothing captured yet**: a stop arriving before the first video frame leaves a session that
+  was never started, and `finishWriting()` then fails with an opaque error. That case cancels
+  the write, deletes the empty file and says what happened. The window is a few tens of
+  milliseconds — exactly long enough to hit when the stop comes from a script.
 - **Clean shutdown**: `SIGINT` **must not** simply kill the process — a `.mov` without a `moov`
   atom is a useless file. A handler marks the inputs with `markAsFinished()` and waits for
   `finishWriting(completionHandler:)` before exiting. That is the difference between "Ctrl-C
@@ -296,12 +394,23 @@ The recorder captures video **and** audio:
 - `--audio system` (default): system audio through ScreenCaptureKit. A single AAC track.
   **One TCC permission only** (Screen Recording). It is what OBS did with the "macOS Screen
   Capture" input, without OBS.
-- `--audio mic`: microphone through `AVCaptureSession`, on a separate track.
+- `--audio mic`: microphone through `AVCaptureSession`, on a separate track. Which device is
+  a real choice, unlike system audio, so `cinta devices` enumerates input devices and `--mic`
+  selects one by index or `id:UID`. The capture side is forced to mono 16-bit 48 kHz so the
+  writer's AAC settings always match the source: the built-in MacBook microphone advertises 3
+  channels, and letting that reach the encoder unchanged is a source of silent failures.
 - `--audio both`: `cintarec` writes **two audio tracks** into the `.mov` (system and mic) and
   reports them in the JSON. The Python layer then mixes them with ffmpeg (`amix`), which is
   already a dependency. Mixing inside Swift would mean building an `AVAudioEngine` with
-  resampling; not worth it when ffmpeg is right there and keeping the tracks separate is useful
-  if you ever want to edit them.
+  resampling; not worth it when ffmpeg is right there.
+
+  **The mix is not optional in practice.** A two-track file is not a neutral intermediate: every
+  player sounds both tracks at once, and the microphone has picked up the speakers a few
+  milliseconds late, so the two combine into audible comb filtering. Left unmixed, `--audio
+  both` simply sounds broken. So `cinta record` mixes by default and `--keep-tracks` opts out
+  for anyone who wants to edit the sources separately. `amix` runs with `normalize=0`, because
+  its default divides every input by the number of sources and halves both; the video stream is
+  copied, not re-encoded.
 - `--audio none`: video only.
 
 ### 5.4 Permissions (TCC) — the important surprise
@@ -313,8 +422,9 @@ Ghostty / VS Code. Design consequences:
 - On first use you have to open System Settings and enable **your terminal** under Privacy &
   Security → Screen Recording. And **restart the terminal**.
 - `cintarec` preflights with `CGPreflightScreenCaptureAccess()`. When permission is missing it
-  does not blindly trigger the system dialog: it prints which app exactly needs authorizing and
-  offers to open the pane:
+  does not blindly trigger the system dialog: it names the responsible app (read from
+  `$TERM_PROGRAM`) so the user does not go looking for `cintarec` in a list that will never
+  contain it, and offers to open the pane:
   `open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"`.
 - If you switch terminals, you have to do it again. That is inherent to macOS, not to this
   design.
@@ -333,15 +443,23 @@ done. But it has to be documented well in the README or first use will be confus
 
 ```jsonc
 // cintarec --list
-{"displays":[{"id":1,"width":3456,"height":2234,"name":"Built-in"}],
- "windows":[{"id":512,"app":"Safari","title":"..."}],
- "applications":[{"bundleID":"com.apple.Safari","name":"Safari"}]}
+{"displays":[{"index":1,"id":2,"name":"Mi Monitor",
+              "width":3440,"height":1440,"scale":1,
+              "pixelWidth":3440,"pixelHeight":1440,"isMain":false}],
+ "microphones":[{"index":1,"id":"BuiltInMicrophoneDevice",
+                 "name":"MacBook Pro Microphone","isDefault":true}],
+ "windows":[{"id":512,"app":"Safari","bundleID":"com.apple.Safari",
+             "title":"...","width":1440,"height":900}],
+ "applications":[{"bundleID":"com.apple.Safari","name":"Safari","pid":403}]}
 
 // cintarec --duration 60 --output out.mov  (on completion)
 {"path":"/Users/.../out.mov","durationSeconds":60.02,"fps":30,
- "width":3456,"height":2234,"codec":"h264",
- "audioTracks":[{"kind":"system","channels":2},{"kind":"mic","channels":1}],
+ "width":3440,"height":1440,"codec":"h264",
+ "display":{"index":1,"id":2,"name":"Mi Monitor","isMain":false, ...},
+ "audioTracks":[{"kind":"system","channels":2},
+                {"kind":"mic","channels":1,"device":"MacBook Pro Microphone"}],
  "bytes":184029184,"stoppedBy":"duration"}
+// stoppedBy is one of: duration | keypress | signal | eof | error
 ```
 
 Exit codes: `0` ok · `10` no screen permission · `11` no microphone permission ·
@@ -400,6 +518,9 @@ uv build                    # sdist + wheel
 uv lock --upgrade
 ```
 
+`[tool.uv] python-preference = "only-managed"` in `pyproject.toml` makes it impossible to pick
+up a conda or brew interpreter by accident.
+
 `.python-version` pins the interpreter and `uv.lock` locks the development dependencies
 (pytest, ruff). Runtime dependencies are still zero, so `uv.lock` only describes the working
 environment. `uv run` does not require anything to be activated, which means the miniconda
@@ -424,23 +545,25 @@ The reason is that the `uv_build` backend only exists *inside* uv; pip does not 
 cannot fetch it without network access. We could add `depends_on "uv" => :build` and build the
 wheel in the formula, but that drags in a 40 MB build dependency to save a six-line block.
 
-**Decision: there is no `[build-system]` until the day we package.** Verified: without that
-section `uv sync` creates the environment, installs the development dependencies and `uv run`
-works — uv treats the project as "virtual" and does not try to build it.
+**The backend is `flit_core`**: no transitive dependencies, which means a single `resource` in
+the formula. `hatchling` would work too, at the cost of five `resource` blocks instead of one;
+the only option ruled out on technical grounds is `uv_build`.
 
-**The cost of that decision, measured.** Because the project is not installed into the venv and
-the package lives under `src/`, `cinta` is *not* importable from a plain `uv run`. Two
-workarounds are in place and they are the whole price:
+**This was originally deferred, and the deferral was wrong.** The plan was to ship no
+`[build-system]` at all until packaging day, on the grounds that `uv sync` works without one —
+which is true, uv treats such a project as "virtual" and does not build it. What that misses is
+that a virtual project is never *installed* into the venv, so with a `src/` layout there is no
+`cinta` executable and no importable `cinta` module. In practice that meant:
 
-- `[tool.pytest.ini_options] pythonpath = ["src"]` so the tests can import the package.
-- A `Makefile` that prefixes `PYTHONPATH=src`, so development runs go through
-  `make run ARGS="..."` rather than `uv run python -m cinta`.
+- `uv run cinta` — the obvious thing to type — failed with "Failed to spawn: `cinta`".
+- `uv run python -m cinta` failed too, needing a `PYTHONPATH=src` prefix wrapped in a Makefile.
+- Running the CLI from anywhere else needed a 140-character shell alias.
+- `pytest` needed `pythonpath = ["src"]` to see the package at all.
 
-When packaging time comes, the backend will be **`flit_core`**: no transitive dependencies,
-meaning a single `resource` in the formula. It is a three-line change in `pyproject.toml` with
-no effect on the code, and adding it also makes both workarounds above disappear. `hatchling`
-would work too, at the cost of five `resource` blocks instead of one; the only option ruled out
-on technical grounds is `uv_build`.
+The fix is three lines of `pyproject.toml` and it deletes all four workarounds. The lesson is
+narrow and worth keeping: deferring the build backend is only free for a library nobody runs
+from the command line. For a project whose whole point is a command, the backend is what makes
+the command exist, so it belongs in from the start.
 
 ### 7.3 The other decision that simplifies everything
 
@@ -635,6 +758,14 @@ JSON boundaries start causing real bugs.
    `--compatible` flag that already exists for downloads). HEVC sits behind `--codec hevc`.
 6. **Package name.** `cinta` everywhere: Homebrew formula, Python module, command and
    repository. Verified free on the local PATH, in homebrew-core and on PyPI.
-7. **`uv_build` is ruled out as a backend** because of the offline-install incompatibility with
+7. **Narration (`--audio both`) is usable but not good, and that is physics.** Recording the
+   microphone while sound plays through speakers means the microphone hears the speakers a few
+   milliseconds late. Two tracks sound hollow, a mix sounds like an echo; both are the same
+   defect. Headphones remove it entirely, and no amount of processing on our side matches that.
+   If narration ever becomes a real use case, the useful work is not echo cancellation but
+   input control: per-source levels, a noise gate, and a meter to check the microphone before
+   committing to a long take. Until then, the honest documentation is "use headphones", and the
+   default stays system audio only.
+8. **`uv_build` is ruled out as a backend** because of the offline-install incompatibility with
    Homebrew (§7.2). If Homebrew ever adopts uv for installing Python packages, the decision is
    worth revisiting: it is a two-line change in `pyproject.toml`.
