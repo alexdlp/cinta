@@ -140,8 +140,8 @@ cinta [--json] [--quiet] [-v] <subcommand> ...
 
   devices                  List screens and microphones
   download    URL          Download audio or video
-  transcribe  URL          Download and transcribe
-  batch       [PATHS...]   Transcribe local files
+  transcribe  [PATHS...]   Transcribe media into text
+  record      [DURATION]   Record the screen
   record      [DURATION]   Record the screen
   models      <action>     Manage Whisper models
   version
@@ -235,7 +235,15 @@ metadata header to the `.txt`. Same as today, except:
 - `--lang` and `--model` stop being hardcoded in the bash wrapper.
 - If yt-dlp returns several files, they are transcribed in sequence instead of `sys.exit(1)`.
 
-### 4.3 `cinta batch`
+### 4.3 `cinta transcribe` absorbs what was going to be `cinta batch`
+
+The plan had two commands split by where the input came from: `transcribe URL` and
+`batch PATHS`. That split is an implementation detail leaking into the interface — from the
+outside both are "turn this into text", and nobody remembers which verb takes which kind of
+argument. One command takes any number of arguments; a URL is just another kind of argument
+once `download` exists. Multiple files is not a separate mode, it is several arguments.
+
+### 4.3b The old `cinta batch` design, kept for its error handling
 
 ```
 cinta batch [PATHS...] [--ext mp4] [--output-dir DIR] [--jobs N] [--skip-existing]
@@ -477,13 +485,38 @@ The `whispercpp` symlink and the `~/whisper.cpp/` paths are gone.
 - **The binary**: Homebrew installs the `whisper.cpp` formula (v1.9.4 today), which provides
   `whisper-cli` on the PATH. `external.py` looks for it on the PATH and, as a fallback, in
   `$(brew --prefix)/bin`.
-- **The models**: they cannot be distributed (`ggml-large-v3.bin` ≈ 3 GB). Resolution order:
+- **The models**: two of them, pinned in the source, with no catalogue and no `--model` flag.
+  `ggml-large-v3.bin` for speech and `ggml-silero-v5.1.2.bin` for voice activity detection.
+  Choosing a model is a decision the user has no basis to make; cinta takes the most accurate
+  one and that is the end of it. When a better model appears, the constant changes, and
+  upgrading cinta replaces the file.
 
-  1. `--model` on the command line
-  2. `$CINTA_MODEL` / `$CINTA_MODEL_DIR`
-  3. `~/.config/cinta/config.toml`
-  4. `~/Library/Application Support/cinta/models/`
-  5. `$(brew --prefix)/share/whisper.cpp/models/`
+  **Why cinta downloads them at all**, given that it is meant to be a thin wrapper: whisper.cpp
+  ships no models. Its Homebrew formula installs the binary and a 562 KB test stub, and its
+  caveats tell you to go and fetch the real thing from a web page. The script that makes this
+  painless (`models/download-ggml-model.sh`) lives in the source repository, which Homebrew does
+  not install — which is why anyone who built from source has models without remembering how.
+  Two fixed URLs is the whole of it:
+
+  ```
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin
+  https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin
+  ```
+
+  Downloads resume: 3 GB that dies at 80% must not start over, so bytes land in a `.part` file
+  continued with a `Range` request.
+
+- **Where they live**: `~/cinta/models/`, overridable with `$CINTA_MODELS_DIR`.
+
+  whisper.cpp has no opinion — its `-m` default is `models/ggml-base.en.bin`, a path relative to
+  the working directory, left over from running inside the source tree. So the location is
+  cinta's to choose. It goes under the output directory because cinta owns these files' whole
+  life: it downloads them, replaces them on upgrade and removes them on request. One directory
+  for everything, so `rm -rf ~/cinta` leaves nothing behind.
+
+  Rejected: `$(brew --prefix)/share/whisper.cpp/`, because that path contains the version
+  number. `brew upgrade whisper.cpp` would delete 3 GB and give nothing back — the formula has
+  no models to replace them with.
 
 - The options currently hardcoded in the bash wrapper (`--vad`, `--temperature 0`, `-mc 0`,
   `-sns`, `--max-len 192`, `--vad-threshold 0.7`, `-l auto`, `-pp`) become the **default
@@ -494,8 +527,19 @@ path requires no downloads: `brew install` leaves the tool usable, and
 `cinta models download large-v3` leaves it complete.
 
 `cinta doctor` is out of scope. Its useful parts are distributed where they belong: the
-permission check lives in the `cintarec` preflight (§5.4) and the model check in
-`cinta models list`.
+permission check lives in the `cintarec` preflight (§5.4), and a missing model is not something
+to check for because cinta fetches it.
+
+### 6.1 Reading whisper-cli's output
+
+`whisper-cli` writes its transcript to **stdout** and roughly 150 lines of backend and timing
+detail to stderr, for a ten-second clip. Inheriting the terminal would put the transcript in the
+middle of cinta's own stdout, where only file paths belong, and bury the useful line in noise.
+
+So both streams are read and filtered: transcript segments and the detected language are echoed
+to stderr as they arrive, progress is rewritten in place, and everything else is kept only to be
+shown if the run fails. `-np` was considered and is not enough — most of the noise comes from
+ggml and Metal, below whisper-cli's own printing.
 
 ---
 
