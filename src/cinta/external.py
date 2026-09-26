@@ -12,6 +12,10 @@ from .errors import RECORDER_EXIT_CODES, CintaError
 
 RECORDER_NAME = "cintarec"
 
+# The binary and the formula that provides it are not always called the same
+# thing, and the error message has to name the one you can actually install.
+FORMULA_FOR = {"whisper-cli": "whisper.cpp"}
+
 
 def tool_path(name: str) -> Path:
     """Locate an external tool without trusting PATH blindly (DESIGN.md 7.6).
@@ -37,7 +41,20 @@ def tool_path(name: str) -> Path:
     if found:
         return Path(found)
 
-    raise CintaError(f"{name} is not installed.", hint=f"Run: brew install {name}")
+    raise CintaError(
+        f"{name} is not installed.", hint=f"Run: brew install {FORMULA_FOR.get(name, name)}"
+    )
+
+
+def run_tool_streaming(name: str, arguments: list[str]) -> None:
+    """Run a tool whose progress the user should see while it works.
+
+    Transcribing an hour of audio takes minutes; hiding whisper-cli's progress
+    output would leave the terminal looking frozen.
+    """
+    result = subprocess.run([str(tool_path(name)), *arguments], check=False)
+    if result.returncode != 0:
+        raise CintaError(f"{name} failed with exit code {result.returncode}.")
 
 
 def run_tool(name: str, arguments: list[str]) -> None:

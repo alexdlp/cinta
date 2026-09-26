@@ -5,6 +5,34 @@ from pathlib import Path
 from ..external import run_tool
 
 
+def wav_arguments(source: Path, destination: Path) -> list[str]:
+    """Anything to 16 kHz mono PCM, which is what Whisper works in internally.
+
+    Converting here rather than letting whisper-cli do it means one code path
+    for every input: it only accepts wav, mp3, flac and ogg, and a screen
+    recording is none of those.
+    """
+    return [
+        "-y",
+        "-v",
+        "error",
+        "-i",
+        str(source),
+        "-vn",
+        "-acodec",
+        "pcm_s16le",
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        str(destination),
+    ]
+
+
+def extract_audio(source: Path, destination: Path) -> None:
+    run_tool("ffmpeg", wav_arguments(source, destination))
+
+
 def mix_arguments(source: Path, destination: Path) -> list[str]:
     """Collapse the two audio tracks of a recording into one.
 

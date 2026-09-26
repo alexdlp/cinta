@@ -4,7 +4,7 @@ import argparse
 import sys
 
 from . import __version__
-from .commands import devices, record
+from .commands import devices, record, transcribe
 from .errors import CintaError
 from .ui import say
 
@@ -20,6 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
     devices.add_parser(subparsers)
     record.add_parser(subparsers)
+    transcribe.add_parser(subparsers)
     return parser
 
 
