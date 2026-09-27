@@ -2,6 +2,8 @@
 name = "cinta"
 version = "0.1.0"
 description = "Record, download and transcribe audio and video from the command line"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "alexdlp", email = "alexdlp.dlp@gmail.com" }
 ]
@@ -14,11 +16,11 @@ cinta = "cinta.cli:main"
 # flit_core has no transitive dependencies, which is what keeps the Homebrew
 # formula down to a single resource (DESIGN.md 6.2).
 [build-system]
-requires = ["flit_core>=3.9,<4"]
+requires = ["flit_core>=3.12,<4"]
 build-backend = "flit_core.buildapi"
 
 [tool.uv]
-# uv-managed interpreters only: neither miniconda nor brew gets picked up (7.6).
+# uv-managed interpreters only: neither miniconda nor brew gets picked up (6.6).
 python-preference = "only-managed"
 
 [dependency-groups]

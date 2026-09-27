@@ -70,24 +70,27 @@ cinta/
 │   │   ├── devices.py
 │   │   ├── download.py
 │   │   ├── transcribe.py
-│   │   ├── record.py
-│   │   └── models.py
+│   │   └── record.py
 │   └── core/
-│       ├── downloader.py       # yt-dlp argv construction + -J parsing
+│       ├── downloader.py       # yt-dlp argv construction, reading back the paths
+│       ├── layout.py           # one file loose, several files in a job folder
 │       ├── media.py            # ffmpeg: to 16k mono WAV, track mixing
-│       ├── whisper.py          # whisper-cli argv + model resolution
+│       ├── transcription.py    # media file -> .txt + .srt, shared by all commands
+│       ├── whisper.py          # whisper-cli argv + output filtering
 │       ├── recorder.py         # client for the Swift binary (JSON contract)
-│       ├── models.py           # catalog, download and verification of models
-│       └── transcript.py       # metadata header of the .txt
+│       └── models.py           # the two pinned models, resumable download
 ├── swift/cintarec/
 │   ├── Package.swift           # swift-tools-version:5.9, .macOS(.v13)
 │   ├── Info.plist              # NSMicrophoneUsageDescription (embedded)
 │   └── Sources/cintarec/
-│       ├── main.swift          # hand-rolled argument parsing (no SPM deps)
+│       ├── main.swift          # entry point
+│       ├── Options.swift       # hand-rolled argument parsing (no SPM deps)
 │       ├── Shareable.swift     # SCShareableContent -> --list as JSON
+│       ├── Microphone.swift    # input devices for --audio mic|both
 │       ├── Recorder.swift      # SCStream + delegates
 │       ├── Writer.swift        # AVAssetWriter (video + audio)
 │       ├── Permissions.swift   # TCC preflight
+│       ├── Exit.swift          # exit codes, part of the contract
 │       └── Report.swift        # output JSON
 ├── tests/
 │   ├── unit/                   # no network, no real subprocesses
@@ -469,7 +472,7 @@ a fake `cintarec` that prints fixture JSON.
   whisper.cpp has no opinion — its `-m` default is `models/ggml-base.en.bin`, a path relative to
   the working directory, left over from running inside the source tree. So the location is
   cinta's to choose. It goes under the output directory because cinta owns these files' whole
-  life: it downloads them, replaces them on upgrade and removes them on request. One directory
+  life: it downloads them and replaces them on upgrade. One directory
   for everything, so `rm -rf ~/cinta` leaves nothing behind.
 
   Rejected: `$(brew --prefix)/share/whisper.cpp/`, because that path contains the version
@@ -509,7 +512,7 @@ Two things get confused and must be separated: **uv as the project manager** (de
 former and has no role in the latter, because users install with `brew install` and Homebrew
 uses its own Python and its own pip.
 
-**uv is the development and CI tool.** It replaces conda entirely:
+**uv is the development and CI tool**, with no conda involved:
 
 ```bash
 uv python install 3.13      # uv's own CPython, independent of conda and brew
@@ -518,9 +521,6 @@ uv run pytest
 uv build                    # sdist + wheel
 uv lock --upgrade
 ```
-
-`[tool.uv] python-preference = "only-managed"` in `pyproject.toml` makes it impossible to pick
-up a conda or brew interpreter by accident.
 
 `.python-version` pins the interpreter and `uv.lock` locks the development dependencies
 (pytest, ruff). Runtime dependencies are still zero, so `uv.lock` only describes the working
@@ -592,7 +592,7 @@ class Cinta < Formula
 
   # The project's only resource: the build backend. No transitive dependencies.
   resource "flit_core" do
-    url "https://files.pythonhosted.org/packages/.../flit_core-4.1.0.tar.gz"
+    url "https://files.pythonhosted.org/packages/.../flit_core-3.12.0.tar.gz"
     sha256 "..."
   end
 
@@ -621,7 +621,7 @@ class Cinta < Formula
   end
 
   test do
-    assert_match version.to_s, shell_output("#{bin}/cinta version")
+    assert_match version.to_s, shell_output("#{bin}/cinta --version")
     assert_match "usage", shell_output("#{bin}/cinta --help")
     assert_match "Screens", shell_output("#{bin}/cinta devices 2>&1", 10)  # no TCC, exits 10
     system libexec/"cintarec", "--version"   # needs no TCC
@@ -645,7 +645,7 @@ Homebrew **never** deletes user data. After uninstalling these remain, and it ha
 documented:
 
 - `~/.config/cinta/` (configuration)
-- `~/Library/Application Support/cinta/models/` (models, the gigabytes)
+- `~/cinta/` (recordings, downloads, transcripts, and the models: the gigabytes)
 
 The README and the formula's caveats both state the `rm -rf ~/cinta` line for full removal.
 There is no `cinta` command for it: uninstalling is Homebrew's job, and Homebrew deliberately
@@ -690,8 +690,8 @@ lives in `external.py`** and is replaced by a double in tests.
   the generic fallback.
 - argv construction, with snapshots: ffmpeg to WAV, `whisper-cli`, `cintarec`. Catches flag
   regressions without executing anything.
-- Parsing the JSON from `yt-dlp --print-json` → metadata header (including the awkward cases
-  the current code already handles: malformed `upload_date`, `duration` of `None`).
+- Reading back the paths yt-dlp reports through `--print-to-file`, for a single video and for
+  a playlist.
 - Parsing the `cintarec` JSON and mapping its exit codes to errors with useful messages.
 - Model handling: the two files are pinned, and one already on disk is never downloaded again.
 - Output path derivation and filename sanitization.
@@ -728,21 +728,18 @@ lives in `external.py`** and is replaced by a double in tests.
 
 ## 8. Open decisions and risks
 
-1. **yt-dlp as a subprocess rather than a library.** Hugely simplifies packaging (§6.3), but it
-   is a real change from the current code. `core/downloader.py` sits behind an interface in case
-   it ever has to be reverted.
+1. **yt-dlp as a subprocess rather than a library.** Hugely simplifies packaging (§6.3).
+   `core/downloader.py` is the only module that knows how yt-dlp is invoked, so switching to
+   the library would stay contained there.
 2. **Compiling Swift on every install** takes ~1 min and requires the Xcode Command Line Tools.
    Solved by publishing bottles from CI; not a blocker for the formula to work.
-3. **The model catalog carries fixed SHA-256 hashes.** If Hugging Face republishes a `.bin`,
-   verification will fail and the catalog has to be updated. That is the price of detecting
-   corrupt downloads, and a loud failure beats a silent one.
-4. **macOS 13 minimum.** Leaves Monterey out. In exchange, system audio without drivers. Given
+3. **macOS 13 minimum.** Leaves Monterey out. In exchange, system audio without drivers. Given
    that development happens on macOS 26, the real cost is zero.
-5. **The output `.mov`** uses H.264 for QuickTime compatibility (consistent with the
+4. **The output `.mov`** uses H.264 for QuickTime compatibility (consistent with the
    `--compatible` flag that already exists for downloads). HEVC sits behind `--codec hevc`.
-6. **Package name.** `cinta` everywhere: Homebrew formula, Python module, command and
+5. **Package name.** `cinta` everywhere: Homebrew formula, Python module, command and
    repository. Verified free on the local PATH, in homebrew-core and on PyPI.
-7. **Narration (`--audio both`) is usable but not good, and that is physics.** Recording the
+6. **Narration (`--audio both`) is usable but not good, and that is physics.** Recording the
    microphone while sound plays through speakers means the microphone hears the speakers a few
    milliseconds late. Two tracks sound hollow, a mix sounds like an echo; both are the same
    defect. Headphones remove it entirely, and no amount of processing on our side matches that.
@@ -750,6 +747,6 @@ lives in `external.py`** and is replaced by a double in tests.
    input control: per-source levels, a noise gate, and a meter to check the microphone before
    committing to a long take. Until then, the honest documentation is "use headphones", and the
    default stays system audio only.
-8. **`uv_build` is ruled out as a backend** because of the offline-install incompatibility with
+7. **`uv_build` is ruled out as a backend** because of the offline-install incompatibility with
    Homebrew (§6.2). If Homebrew ever adopts uv for installing Python packages, the decision is
    worth revisiting: it is a two-line change in `pyproject.toml`.

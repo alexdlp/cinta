@@ -1,5 +1,7 @@
 """Recording or downloading and transcribing in one command."""
 
+from pathlib import Path
+
 import pytest
 
 from cinta.cli import main
@@ -68,7 +70,7 @@ def test_downloading_with_transcription_groups_them_too(monkeypatch, fake_transc
         paths_file = arguments[arguments.index("--print-to-file") + 2]
         media = tmp_path / "lesson.mp3"
         media.write_bytes(b"audio")
-        open(paths_file, "w").write(f"{media}\n")
+        Path(paths_file).write_text(f"{media}\n")
 
     monkeypatch.setattr(downloader, "run_tool_relaying", fake_run)
 
