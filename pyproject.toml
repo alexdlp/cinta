@@ -32,8 +32,12 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The fast loop is the default; the other two are asked for by name, and a -m
+# on the command line replaces this one.
+addopts = "-m 'not integration and not recording'"
 markers = [
-    "integration: uses real external tools (ffmpeg, whisper-cli); outside the fast loop",
+    "integration: real ffmpeg, whisper-cli, yt-dlp and models; pytest -m integration",
+    "recording: records the screen, needs the TCC permission; pytest -m recording",
 ]
 
 [tool.ruff]

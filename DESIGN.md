@@ -94,8 +94,7 @@ cinta/
 │   └── Tests/cintarecTests/    # swift-testing: options, configuration, JSON shape
 ├── tests/
 │   ├── unit/                   # no network, no real subprocesses
-│   ├── integration/            # marked, use ffmpeg and the tiny model
-│   └── fixtures/               # 3s wav, yt-dlp JSON, cintarec JSON
+│   └── integration/            # real tools and models; also the by-hand recording test
 ├── uv.lock                     # lock file for the development dependencies
 ├── .python-version             # CPython managed by uv, not by conda
 ├── .github/workflows/ci.yml
@@ -696,14 +695,26 @@ lives in `external.py`** and is replaced by a double in tests.
 - Model handling: the two files are pinned, and one already on disk is never downloaded again.
 - Output path derivation and filename sanitization.
 
-**Integration** (marked `@pytest.mark.integration`, outside the fast loop):
+**Integration** (`pytest -m integration`, outside the fast loop): real ffmpeg, whisper-cli and
+yt-dlp, and the same large-v3 and Silero models a user gets. A smaller model would be testing
+something cinta never runs.
 
-- A 3 s WAV generated with `ffmpeg -f lavfi -i sine` → `whisper-cli` with the **tiny** model
-  (75 MB, cached in CI) → assert that non-empty `.txt` and `.srt` come out.
-- `cinta download` against a local **`file://` URL** (yt-dlp supports them) to exercise the full
-  pipeline without depending on YouTube or the network.
-- `cinta transcribe` over three files, one of them corrupt: verifies the other two are
-  processed and the exit code is nonzero.
+- The media is generated, not committed: `say -v Samantha` speaks a known sentence, and the
+  tests check those words come back. A tone would not work, since voice-activity detection
+  correctly finds no speech in it. The voice is named because the default follows the system
+  language, and a Spanish voice reading English is transcribed as something else.
+- `cinta transcribe` over an audio file and a video: both transcripts hold the sentence, and
+  the `.srt` has timestamps.
+- `cinta transcribe` with a corrupt file first: it fails alone, the good file is still
+  transcribed, and the exit code is nonzero.
+- `cinta download` against a **`file://` URL**, to run the full yt-dlp pipeline without
+  depending on YouTube or the network: video by default, MP3 with `--audio`, and
+  `--transcribe` leaving the media and its transcript in one folder.
+
+**Recording** (`pytest -m recording`, by hand): three seconds of real screen, checked with
+`ffprobe` for duration, H.264 with even dimensions, and the right number of audio tracks. It
+cannot run in CI, since runners have no display and no screen recording permission, so it is
+run locally after touching `cintarec` and before a release.
 
 **Swift** (swift-testing, which ships with the Command Line Tools; XCTest needs a full Xcode):
 
@@ -716,9 +727,6 @@ lives in `external.py`** and is replaced by a double in tests.
 **Across the boundary** (`tests/unit/test_contract.py`, in Python because it reads both sides):
 every exit code `cintarec` defines has an explanation in `errors.py`, and the version is the
 same in `pyproject.toml`, `__init__.py` and `main.swift`.
-- Real recording **is not testable in CI**: runners have no TCC permissions and no attached
-  display. It is covered by a smoke run that records 3 s locally and validates the `.mov` with
-  `ffprobe` (duration, codec, track count).
 
 **CI** (GitHub Actions, `macos-15` runner):
 
@@ -726,8 +734,8 @@ same in `pyproject.toml`, `__init__.py` and `main.swift`.
 |---|---|
 | `lint` | `uv run ruff check` and `ruff format --check` over `src/` and `tests/` |
 | `test` | `uv run pytest` unit tests on Python 3.11/3.12/3.13 (`uv python install`) |
-| `integration` | `pytest -m integration` with ffmpeg and the tiny model cached |
-| `swift` | `swift build -c release` + `swift test` |
+| `integration` | `pytest -m integration`, tools from Homebrew, the models cached between runs |
+| `swift` | `swift test` + `swift build -c release` + `cintarec --version` |
 | `brew` | `brew install --build-from-source` from the tap + `brew test` + `brew audit --strict` |
 
 ---
