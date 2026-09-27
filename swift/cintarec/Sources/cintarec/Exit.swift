@@ -22,11 +22,16 @@ func fail(_ code: ExitCode, _ message: String) -> Never {
     exit(code.rawValue)
 }
 
-func emitJSON<T: Encodable>(_ value: T) {
+/// Separate from emitJSON so tests can check the contract without capturing stdout.
+func encodeJSON<T: Encodable>(_ value: T) throws -> Data {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    return try encoder.encode(value)
+}
+
+func emitJSON<T: Encodable>(_ value: T) {
     do {
-        var data = try encoder.encode(value)
+        var data = try encodeJSON(value)
         data.append(0x0A)
         FileHandle.standardOutput.write(data)
     } catch {

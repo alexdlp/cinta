@@ -161,7 +161,7 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         return (display(withID: info.id)!, info)
     }
 
-    private static func makeConfiguration(options: RecordOptions, display: DisplayInfo)
+    static func makeConfiguration(options: RecordOptions, display: DisplayInfo)
         -> SCStreamConfiguration
     {
         let configuration = SCStreamConfiguration()
@@ -192,7 +192,7 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         return configuration
     }
 
-    private static func even(_ value: Double) -> Int {
+    static func even(_ value: Double) -> Int {
         let rounded = Int(value.rounded())
         return rounded % 2 == 0 ? rounded : rounded - 1
     }

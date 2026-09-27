@@ -41,6 +41,7 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
+      - run: swift test --package-path swift/cintarec
       - run: swift build -c release --package-path swift/cintarec
       # --version needs no TCC permission, so it is the one thing a runner can
       # execute: it proves the binary links and starts.

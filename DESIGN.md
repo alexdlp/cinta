@@ -81,16 +81,17 @@ cinta/
 ├── swift/cintarec/
 │   ├── Package.swift           # swift-tools-version:5.9, .macOS(.v13)
 │   ├── Info.plist              # NSMicrophoneUsageDescription (embedded)
-│   └── Sources/cintarec/
-│       ├── main.swift          # entry point
-│       ├── Options.swift       # hand-rolled argument parsing (no SPM deps)
-│       ├── Shareable.swift     # SCShareableContent -> --list as JSON
-│       ├── Microphone.swift    # input devices for --audio mic|both
-│       ├── Recorder.swift      # SCStream + delegates
-│       ├── Writer.swift        # AVAssetWriter (video + audio)
-│       ├── Permissions.swift   # TCC preflight
-│       ├── Exit.swift          # exit codes, part of the contract
-│       └── Report.swift        # output JSON
+│   ├── Sources/cintarec/
+│   │   ├── main.swift          # entry point
+│   │   ├── Options.swift       # hand-rolled argument parsing (no SPM deps)
+│   │   ├── Shareable.swift     # SCShareableContent -> --list as JSON
+│   │   ├── Microphone.swift    # input devices for --audio mic|both
+│   │   ├── Recorder.swift      # SCStream + delegates
+│   │   ├── Writer.swift        # AVAssetWriter (video + audio)
+│   │   ├── Permissions.swift   # TCC preflight
+│   │   ├── Exit.swift          # exit codes, part of the contract
+│   │   └── Report.swift        # output JSON
+│   └── Tests/cintarecTests/    # swift-testing: options, configuration, JSON shape
 ├── tests/
 │   ├── unit/                   # no network, no real subprocesses
 │   ├── integration/            # marked, use ffmpeg and the tiny model
@@ -704,11 +705,17 @@ lives in `external.py`** and is replaced by a double in tests.
 - `cinta transcribe` over three files, one of them corrupt: verifies the other two are
   processed and the exit code is nonzero.
 
-**Swift** (XCTest):
+**Swift** (swift-testing, which ships with the Command Line Tools; XCTest needs a full Xcode):
 
-- Argument parsing and validation (`--fps 0`, nonexistent `--display`, incompatible flags).
-- Building `SCStreamConfiguration` from the options.
-- Serializing `Report` to JSON.
+- Argument parsing and validation (`--fps 0`, `--scale 1.5`, incompatible flags, missing
+  values). The parser throws instead of exiting, so every rejection is testable.
+- Building `SCStreamConfiguration` from the options: pixels rather than points, even
+  dimensions, system audio only when asked for.
+- The JSON shape of `--list` and of the report, key by key, since Python reads them by name.
+
+**Across the boundary** (`tests/unit/test_contract.py`, in Python because it reads both sides):
+every exit code `cintarec` defines has an explanation in `errors.py`, and the version is the
+same in `pyproject.toml`, `__init__.py` and `main.swift`.
 - Real recording **is not testable in CI**: runners have no TCC permissions and no attached
   display. It is covered by a smoke run that records 3 s locally and validates the `.mov` with
   `ffprobe` (duration, codec, track count).

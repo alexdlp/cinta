@@ -22,6 +22,13 @@ let package = Package(
                     "-Xlinker", "Info.plist",
                 ])
             ]
-        )
+        ),
+        // swift-testing rather than XCTest: it ships with the Command Line Tools,
+        // while XCTest needs a full Xcode install.
+        .testTarget(
+            name: "cintarecTests",
+            dependencies: ["cintarec"],
+            path: "Tests/cintarecTests"
+        ),
     ]
 )

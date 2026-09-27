@@ -34,16 +34,23 @@ enum Command {
     case help
 }
 
+/// A bad command line. Thrown rather than exiting on the spot so the parser can
+/// be tested; main.swift turns it into exit code 20.
+struct UsageError: Error {
+    let message: String
+    init(_ message: String) { self.message = message }
+}
+
 enum Options {
-    static func parse(_ arguments: [String]) -> Command {
+    static func parse(_ arguments: [String]) throws -> Command {
         if arguments.isEmpty {
-            fail(.invalidArguments, "no arguments given.\n\n\(usage)")
+            throw UsageError("no arguments given.\n\n\(usage)")
         }
         if arguments.contains("--help") || arguments.contains("-h") { return .help }
         if arguments.contains("--version") { return .version }
         if arguments.contains("--list") {
             guard arguments.count == 1 else {
-                fail(.invalidArguments, "--list takes no other arguments.\n\n\(usage)")
+                throw UsageError("--list takes no other arguments.\n\n\(usage)")
             }
             return .list
         }
@@ -63,52 +70,52 @@ enum Options {
         while index < arguments.count {
             let flag = arguments[index]
 
-            func value() -> String {
+            func value() throws -> String {
                 index += 1
                 guard index < arguments.count else {
-                    fail(.invalidArguments, "\(flag) needs a value.\n\n\(usage)")
+                    throw UsageError("\(flag) needs a value.\n\n\(usage)")
                 }
                 return arguments[index]
             }
 
             switch flag {
-            case "--display": display = value()
-            case "--mic": mic = value()
-            case "--output": output = value()
-            case "--output-dir": outputDir = value()
+            case "--display": display = try value()
+            case "--mic": mic = try value()
+            case "--output": output = try value()
+            case "--output-dir": outputDir = try value()
             case "--no-cursor": showsCursor = false
             case "--duration":
-                let raw = value()
+                let raw = try value()
                 guard let parsed = Double(raw), parsed > 0 else {
-                    fail(.invalidArguments, "--duration must be a positive number of seconds, got '\(raw)'")
+                    throw UsageError("--duration must be a positive number of seconds, got '\(raw)'")
                 }
                 duration = parsed
             case "--audio":
-                let raw = value()
+                let raw = try value()
                 guard let parsed = AudioMode(rawValue: raw) else {
-                    fail(.invalidArguments, "--audio must be one of: system, mic, both, none. Got '\(raw)'")
+                    throw UsageError("--audio must be one of: system, mic, both, none. Got '\(raw)'")
                 }
                 audio = parsed
             case "--codec":
-                let raw = value()
+                let raw = try value()
                 guard let parsed = VideoCodec(rawValue: raw) else {
-                    fail(.invalidArguments, "--codec must be one of: h264, hevc. Got '\(raw)'")
+                    throw UsageError("--codec must be one of: h264, hevc. Got '\(raw)'")
                 }
                 codec = parsed
             case "--fps":
-                let raw = value()
+                let raw = try value()
                 guard let parsed = Int(raw), (1...120).contains(parsed) else {
-                    fail(.invalidArguments, "--fps must be between 1 and 120, got '\(raw)'")
+                    throw UsageError("--fps must be between 1 and 120, got '\(raw)'")
                 }
                 fps = parsed
             case "--scale":
-                let raw = value()
+                let raw = try value()
                 guard let parsed = Double(raw), parsed > 0, parsed <= 1 else {
-                    fail(.invalidArguments, "--scale must be greater than 0 and at most 1, got '\(raw)'")
+                    throw UsageError("--scale must be greater than 0 and at most 1, got '\(raw)'")
                 }
                 scale = parsed
             default:
-                fail(.invalidArguments, "unknown argument: \(flag)\n\n\(usage)")
+                throw UsageError("unknown argument: \(flag)\n\n\(usage)")
             }
             index += 1
         }
@@ -118,7 +125,7 @@ enum Options {
                 display: display,
                 mic: mic,
                 duration: duration,
-                output: resolveOutput(output: output, outputDir: outputDir),
+                output: try resolveOutput(output: output, outputDir: outputDir),
                 audio: audio,
                 fps: fps,
                 scale: scale,
@@ -130,14 +137,14 @@ enum Options {
     /// `--output` is what the Python layer uses: it decides naming policy.
     /// `--output-dir` exists so the binary is usable by hand, and generates a
     /// timestamped name.
-    private static func resolveOutput(output: String?, outputDir: String?) -> URL {
+    private static func resolveOutput(output: String?, outputDir: String?) throws -> URL {
         if output != nil, outputDir != nil {
-            fail(.invalidArguments, "--output and --output-dir are mutually exclusive")
+            throw UsageError("--output and --output-dir are mutually exclusive")
         }
         if let output { return URL(fileURLWithPath: (output as NSString).expandingTildeInPath) }
 
         guard let outputDir else {
-            fail(.invalidArguments, "one of --output or --output-dir is required.\n\n\(usage)")
+            throw UsageError("one of --output or --output-dir is required.\n\n\(usage)")
         }
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"
