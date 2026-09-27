@@ -1,13 +1,13 @@
-# The formula published in github.com/alexdlp/homebrew-tap (DESIGN.md 6.4).
-# This copy is the source of truth; the tap gets it with url and sha256 filled
-# in for each release.
+# Written in github.com/alexdlp/cinta at packaging/homebrew/cinta.rb, and
+# copied unchanged into github.com/alexdlp/homebrew-tap for each release. Edit
+# it in alexdlp/cinta, not in the tap (DESIGN.md 6.4).
 class Cinta < Formula
   include Language::Python::Virtualenv
 
   desc "Record, download and transcribe audio and video from the command-line"
   homepage "https://github.com/alexdlp/cinta"
   url "https://github.com/alexdlp/cinta/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  sha256 "7b456babd141cb3be7fff59436b03e86caaf10803ad799ea000bfdcd01cf15a3"
   license "MIT"
 
   depends_on "ffmpeg"
