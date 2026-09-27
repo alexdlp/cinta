@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from .. import config
-from ..core import media, recorder
+from ..core import layout, media, recorder, transcription
 from ..duration import parse_duration
 from ..errors import CintaError
 from ..ui import human_duration, human_size, say
@@ -57,6 +57,12 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     parser.add_argument("--force", action="store_true", help="Overwrite the output if it exists")
     parser.add_argument(
+        "--transcribe",
+        action="store_true",
+        help="Transcribe the recording when it finishes, leaving the video and "
+        "the transcript together in one folder",
+    )
+    parser.add_argument(
         "--keep-tracks",
         action="store_true",
         help="With --audio both, leave system audio and microphone as separate "
@@ -76,6 +82,12 @@ def run(args: argparse.Namespace) -> int:
 
     if args.output:
         output = Path(args.output).expanduser()
+    elif args.transcribe:
+        # The video and its transcript are several files from one job, so the
+        # folder is created before recording starts, while the name is known.
+        directory = config.output_dir(args.output_dir)
+        stem = recorder.output_name(display["name"])
+        output = layout.job_folder(directory, stem) / f"{stem}.mov"
     else:
         directory = config.output_dir(args.output_dir)
         output = recorder.output_path(directory, display["name"])
@@ -115,11 +127,28 @@ def run(args: argparse.Namespace) -> int:
         report["bytes"] = output.stat().st_size
         report["audioTracks"] = [{"kind": "mixed", "channels": 2}]
 
+    transcripts: list[Path] = []
+    if args.transcribe:
+        say("")
+        say("Transcribing the recording...")
+        try:
+            transcripts = transcription.transcribe(output, output.with_suffix(""))
+        except CintaError as error:
+            # The recording is not repeatable; a failure in the second step must
+            # not take the first one down with it.
+            say(f"error: {error.message}")
+            say("")
+            say(f"The recording itself is safe: {output}")
+            say(f"Transcribe it later with:  cinta transcribe {output}")
+            return error.exit_code
+
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
         say(f"Recorded {human_duration(report['durationSeconds'])}, {human_size(report['bytes'])}")
         print(report["path"])
+        for path in transcripts:
+            print(path)
     return 0
 
 

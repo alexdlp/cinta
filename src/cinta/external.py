@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections import deque
 from pathlib import Path
 
 from .errors import RECORDER_EXIT_CODES, CintaError
@@ -18,7 +19,7 @@ FORMULA_FOR = {"whisper-cli": "whisper.cpp"}
 
 
 def tool_path(name: str) -> Path:
-    """Locate an external tool without trusting PATH blindly (DESIGN.md 7.6).
+    """Locate an external tool without trusting PATH blindly (DESIGN.md 6.6).
 
     A conda or pyenv install earlier on PATH would otherwise shadow the one
     Homebrew installed as a dependency of cinta.
@@ -46,15 +47,38 @@ def tool_path(name: str) -> Path:
     )
 
 
-def run_tool_streaming(name: str, arguments: list[str]) -> None:
-    """Run a tool whose progress the user should see while it works.
+def run_tool_relaying(name: str, arguments: list[str]) -> None:
+    """Run a tool whose progress should be visible, sending all of it to stderr.
 
-    Transcribing an hour of audio takes minutes; hiding whisper-cli's progress
-    output would leave the terminal looking frozen.
+    These tools write to stdout: yt-dlp puts its progress bar there. Letting
+    them inherit the terminal would mix that into cinta's own stdout, where only
+    file paths belong, and anything reading those paths would get a screenful of
+    progress instead.
+
+    Relayed as raw chunks rather than lines because progress bars are built from
+    carriage returns with no newline: splitting on lines would show nothing until
+    the download finished.
     """
-    result = subprocess.run([str(tool_path(name)), *arguments], check=False)
-    if result.returncode != 0:
-        raise CintaError(f"{name} failed with exit code {result.returncode}.")
+    process = subprocess.Popen(
+        [str(tool_path(name)), *arguments], stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+    )
+    tail: deque[bytes] = deque(maxlen=64)
+
+    assert process.stdout is not None
+    descriptor = process.stdout.fileno()
+    while True:
+        chunk = os.read(descriptor, 4096)
+        if not chunk:
+            break
+        sys.stderr.buffer.write(chunk)
+        sys.stderr.buffer.flush()
+        tail.append(chunk)
+
+    if process.wait() != 0:
+        detail = b"".join(tail).decode(errors="replace").strip().splitlines()
+        raise CintaError(
+            f"{name} failed.\n" + "\n".join(detail[-5:]) if detail else f"{name} failed."
+        )
 
 
 def run_tool(name: str, arguments: list[str]) -> None:

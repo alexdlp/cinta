@@ -1,4 +1,4 @@
-"""Client for the cintarec JSON contract (DESIGN.md 5.5).
+"""Client for the cintarec JSON contract (DESIGN.md 4.5).
 
 Everything user-friendly happens here: cintarec only understands indices and
 ids, so names are resolved to those before it is invoked.
@@ -75,10 +75,19 @@ def slugify(name: str) -> str:
     return re.sub(r"[^\w-]", "", collapsed) or "screen"
 
 
-def output_path(directory: Path, display_name: str, when: datetime | None = None) -> Path:
-    """<YYYY-MM-DD>-<HHMMSS>-<display>.mov, date first so ls sorts by time."""
+def output_name(display_name: str, when: datetime | None = None) -> str:
+    """<YYYY-MM-DD>-<HHMMSS>-<display>, date first so ls sorts by time.
+
+    Separate from the path because a recording that will also be transcribed
+    needs the name before the file exists, to create the folder that will hold
+    the video and its transcript together.
+    """
     stamp = (when or datetime.now()).strftime("%Y-%m-%d-%H%M%S")
-    return directory / f"{stamp}-{slugify(display_name)}.mov"
+    return f"{stamp}-{slugify(display_name)}"
+
+
+def output_path(directory: Path, display_name: str, when: datetime | None = None) -> Path:
+    return directory / f"{output_name(display_name, when)}.mov"
 
 
 def record(
