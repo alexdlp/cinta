@@ -41,7 +41,10 @@ The project language is English: code, comments, docs, commit messages and user-
 uv sync                    # creates .venv with the uv-managed CPython 3.13
 make build-swift           # builds the screen recorder (once)
 uv run cinta devices       # run the CLI
-make test                  # pytest
+make test                  # the fast tests
+make test-swift            # the recorder's tests
+uv run pytest -m integration   # real ffmpeg, whisper-cli, yt-dlp and models
+uv run pytest -m recording     # records the screen for real; needs the permission
 make fmt                   # ruff format + ruff check --fix
 ```
 
