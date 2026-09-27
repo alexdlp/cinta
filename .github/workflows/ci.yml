@@ -45,9 +45,10 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+      # Homebrew updates itself first on purpose: the runner image ships an old
+      # catalogue, from before whisper-cpp was renamed whisper.cpp, and CI should
+      # install what a user would.
       - run: brew install ffmpeg whisper.cpp yt-dlp
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
       # The same 3 GB of models a user downloads, fetched once and then restored.
       # The key names the two pinned files: change it when core/models.py does.
       - uses: actions/cache@v6
