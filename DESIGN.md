@@ -55,7 +55,6 @@ cinta/
 ├── pyproject.toml              # flit_core build backend (§6.2)
 ├── README.md                   # user-facing
 ├── DESIGN.md                   # this document
-├── CHANGELOG.md
 ├── LICENSE                     # MIT
 ├── Makefile                    # make build-swift / test / fmt
 ├── src/cinta/
