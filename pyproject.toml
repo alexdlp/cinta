@@ -1,6 +1,6 @@
 [project]
 name = "cinta"
-version = "0.1.0"
+version = "0.1.1"
 description = "Record, download and transcribe audio and video from the command line"
 license = "MIT"
 license-files = ["LICENSE"]
