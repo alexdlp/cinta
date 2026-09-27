@@ -19,3 +19,11 @@ struct Report: Encodable {
     let bytes: Int
     let stoppedBy: String
 }
+
+/// Printed on stdout, as one line, the moment the first frame is written.
+/// Until then ScreenCaptureKit is still starting and nothing is being kept.
+struct StartedEvent: Encodable {
+    let event = "started"
+    let path: String
+    let startedAt: String
+}

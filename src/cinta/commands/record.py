@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from .. import config
@@ -100,14 +101,17 @@ def run(args: argparse.Namespace) -> int:
         output.unlink()
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    say(f"Recording {display['name']} ({display['pixelWidth']}x{display['pixelHeight']})")
+    say(f"Screen:    {display['name']} ({display['pixelWidth']}x{display['pixelHeight']})")
     say(f"Audio:     {describe_audio(args.audio, microphone)}")
     say(f"Saving to: {output}")
-    if seconds is None:
-        say("Press Enter to stop.")
-    else:
-        say(f"Stopping after {args.duration}, or press Enter to stop sooner.")
-    say()
+
+    def started(event: dict) -> None:
+        # Said now, not before launching cintarec: until the first frame is
+        # written ScreenCaptureKit is still starting, and anything that plays in
+        # that second is not in the file.
+        if args.json:
+            print(json.dumps(event, ensure_ascii=False), flush=True)
+        say(f"Recording. {how_to_stop(args.duration)}")
 
     report = recorder.record(
         output=output,
@@ -119,7 +123,9 @@ def run(args: argparse.Namespace) -> int:
         scale=args.scale,
         show_cursor=not args.no_cursor,
         codec=args.codec,
+        on_started=started,
     )
+    say()
 
     if args.audio == "both" and not args.keep_tracks:
         say("Mixing system audio and microphone...")
@@ -143,13 +149,26 @@ def run(args: argparse.Namespace) -> int:
             return error.exit_code
 
     if args.json:
-        print(json.dumps(report, indent=2, ensure_ascii=False))
+        # One line per event, so a program can read stdout as it arrives:
+        # "started" when recording begins, "finished" with the report.
+        print(json.dumps({"event": "finished", **report}, ensure_ascii=False))
     else:
         say(f"Recorded {human_duration(report['durationSeconds'])}, {human_size(report['bytes'])}")
         print(report["path"])
         for path in transcripts:
             print(path)
     return 0
+
+
+def how_to_stop(duration: str | None) -> str:
+    # Enter only works with a terminal on stdin; under a program, the way to
+    # stop is a signal.
+    interactive = sys.stdin.isatty()
+    if duration:
+        return f"Stopping after {duration}" + (
+            ", or press Enter to stop sooner." if interactive else "."
+        )
+    return "Press Enter to stop." if interactive else "Send SIGINT or SIGTERM to stop."
 
 
 def describe_audio(mode: str, microphone: dict | None) -> str:

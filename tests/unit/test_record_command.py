@@ -1,5 +1,6 @@
 """cinta record, end to end with the recorder replaced."""
 
+import json
 import re
 
 import pytest
@@ -12,7 +13,7 @@ def test_output_lands_in_the_configured_directory_with_a_timestamped_name(
 ):
     """The naming contract reaching the recorder, not just the helper that builds
     it: config.output_dir and recorder.output_path have to be wired together in
-    the right order for a recording to end up where DESIGN.md 4.0 says."""
+    the right order for a recording to end up where DESIGN.md 3.0 says."""
     assert main(["record", "--display", "1", "2s"]) == 0
 
     written = fake_recorder["record"]["output"]
@@ -134,3 +135,15 @@ def test_capture_options_reach_the_recorder_unchanged(fake_recorder, output_dir)
     assert call["scale"] == 0.5
     assert call["show_cursor"] is False
     assert call["codec"] == "hevc"
+
+
+def test_json_is_one_event_per_line_started_then_finished(fake_recorder, output_dir, capsys):
+    """What a program driving cinta reads: a line when recording really begins,
+    so it knows when to start playing, and a line with the report at the end."""
+    assert main(["--json", "record", "--display", "1", "2s"]) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    events = [json.loads(line) for line in lines]
+    assert [event["event"] for event in events] == ["started", "finished"]
+    assert events[1]["path"] == str(fake_recorder["record"]["output"])
+    assert events[1]["durationSeconds"] == 5.0

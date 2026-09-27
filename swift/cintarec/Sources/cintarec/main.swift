@@ -1,7 +1,7 @@
 import Foundation
 
 // Keep in sync with src/cinta/__init__.py (tests/unit/test_contract.py checks).
-let cintarecVersion = "0.1.0"
+let cintarecVersion = "0.1.1"
 
 let command: Command
 do {

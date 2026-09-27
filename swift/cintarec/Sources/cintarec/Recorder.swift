@@ -49,6 +49,12 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
             mic: options.audio.capturesMic)
 
         let recorder = Recorder(options: options, writer: writer)
+        writer.onStart = {
+            let now = ISO8601DateFormatter()
+            now.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            emitEvent(StartedEvent(path: options.output.path, startedAt: now.string(from: Date())))
+            log("first frame written")
+        }
         let filter = SCContentFilter(
             display: display, excludingApplications: [], exceptingWindows: [])
         let stream = SCStream(filter: filter, configuration: configuration, delegate: recorder)

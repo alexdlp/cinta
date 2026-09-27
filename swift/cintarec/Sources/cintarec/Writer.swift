@@ -13,6 +13,11 @@ final class Writer {
     private let lock = NSLock()
     private var sessionStarted = false
     private var firstPTS = CMTime.zero
+    private var lastVideo: CMSampleBuffer?
+
+    /// Called once, with the first video frame: the moment the file's timeline
+    /// begins, which is what "recording" means to anyone waiting on it.
+    var onStart: (() -> Void)?
 
     init(
         output: URL, width: Int, height: Int, fps: Int, codec: VideoCodec,
@@ -108,10 +113,11 @@ final class Writer {
             writer.startSession(atSourceTime: pts)
             firstPTS = pts
             sessionStarted = true
+            onStart?()
         }
 
         guard videoInput.isReadyForMoreMediaData else { return }
-        videoInput.append(sampleBuffer)
+        if videoInput.append(sampleBuffer) { lastVideo = sampleBuffer }
     }
 
     func appendSystemAudio(_ sampleBuffer: CMSampleBuffer) {
@@ -154,6 +160,7 @@ final class Writer {
 
         let duration = max(0, CMTimeGetSeconds(end - firstPTS))
 
+        holdLastFrame(until: end)
         videoInput.markAsFinished()
         systemAudioInput?.markAsFinished()
         micInput?.markAsFinished()
@@ -170,5 +177,27 @@ final class Writer {
 
         let attributes = try? FileManager.default.attributesOfItem(atPath: output.path)
         return (started: true, duration: duration, bytes: (attributes?[.size] as? Int) ?? 0)
+    }
+
+    /// A video track ends at its last frame, and ScreenCaptureKit sends none
+    /// while the screen is still. A recording whose last seconds are static
+    /// would lose them from the video. Repeating the last frame at the moment
+    /// recording stopped makes the track run to the real end.
+    private func holdLastFrame(until end: CMTime) {
+        guard let last = lastVideo,
+            CMSampleBufferGetPresentationTimeStamp(last) < end,
+            videoInput.isReadyForMoreMediaData
+        else { return }
+
+        var timing = CMSampleTimingInfo(
+            duration: .invalid, presentationTimeStamp: end, decodeTimeStamp: .invalid)
+        var copy: CMSampleBuffer?
+        guard
+            CMSampleBufferCreateCopyWithNewTiming(
+                allocator: kCFAllocatorDefault, sampleBuffer: last, sampleTimingEntryCount: 1,
+                sampleTimingArray: &timing, sampleBufferOut: &copy) == noErr,
+            let copy
+        else { return }
+        videoInput.append(copy)
     }
 }

@@ -59,3 +59,13 @@ private let display = DisplayInfo(
     let text = try #require(String(data: encodeJSON(["path": "/tmp/a.mov"]), encoding: .utf8))
     #expect(text.contains("\"/tmp/a.mov\""))
 }
+
+@Test func startedIsOneLineWithItsKeys() throws {
+    let data = try encodeJSON(
+        StartedEvent(path: "/tmp/a.mov", startedAt: "2026-09-27T12:00:00.000Z"), oneLine: true)
+    let text = try #require(String(data: data, encoding: .utf8))
+    // core/recorder.py recognises the event by this prefix before parsing it.
+    #expect(text.hasPrefix("{\"event\":\"started\""))
+    #expect(!text.contains("\n"))
+    #expect(Set(try object(StartedEvent(path: "", startedAt: "")).keys) == ["event", "path", "startedAt"])
+}

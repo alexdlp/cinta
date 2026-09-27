@@ -23,10 +23,20 @@ func fail(_ code: ExitCode, _ message: String) -> Never {
 }
 
 /// Separate from emitJSON so tests can check the contract without capturing stdout.
-func encodeJSON<T: Encodable>(_ value: T) throws -> Data {
+func encodeJSON<T: Encodable>(_ value: T, oneLine: Bool = false) throws -> Data {
     let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    encoder.outputFormatting =
+        oneLine ? [.sortedKeys, .withoutEscapingSlashes]
+        : [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
     return try encoder.encode(value)
+}
+
+/// An event mid-run: a single line, so a reader can act on it as it arrives
+/// instead of waiting for the process to exit.
+func emitEvent<T: Encodable>(_ value: T) {
+    guard var data = try? encodeJSON(value, oneLine: true) else { return }
+    data.append(0x0A)
+    FileHandle.standardOutput.write(data)
 }
 
 func emitJSON<T: Encodable>(_ value: T) {

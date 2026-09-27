@@ -101,6 +101,7 @@ def record(
     scale: float,
     show_cursor: bool,
     codec: str,
+    on_started=None,
 ) -> dict:
     arguments = [
         "--output",
@@ -123,4 +124,4 @@ def record(
     if not show_cursor:
         arguments.append("--no-cursor")
 
-    return run_recorder(arguments)
+    return run_recorder(arguments, on_started=on_started)

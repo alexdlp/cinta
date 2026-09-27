@@ -4,8 +4,10 @@ is underneath it."""
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 from collections import deque
 from pathlib import Path
 
@@ -132,23 +134,48 @@ def recorder_path() -> Path:
     )
 
 
-def run_recorder(arguments: list[str]) -> dict:
+def run_recorder(arguments: list[str], on_started=None) -> dict:
     """Run cintarec and return its JSON report.
 
-    stdout is the data channel and carries the report. stderr is cintarec's own
-    log: it is captured rather than shown, because the user-facing narration is
-    this layer's job, and surfaced only when something goes wrong.
+    stdout is the data channel. While recording it carries one event line,
+    `{"event": "started", ...}`, the moment the first frame is written; it is
+    handed to `on_started` as it arrives, not after the process exits. The rest
+    of stdout is the report. stderr is cintarec's own log: captured rather than
+    shown, because the user-facing narration is this layer's job, and surfaced
+    only when something goes wrong.
     """
     command = [str(recorder_path()), *arguments]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
+    # Read concurrently: a full stderr pipe would block cintarec mid-recording.
+    stderr_lines: list[str] = []
+    drain = threading.Thread(target=lambda: stderr_lines.extend(process.stderr), daemon=True)
+    drain.start()
+
+    # Stopping cinta must stop cintarec, and cleanly: it has to finish writing
+    # the file, or the .mov has no moov atom and will not play. Ctrl-C in a
+    # terminal reaches both processes, but a program that signals cinta alone
+    # reaches only this one. So both signals are passed on, as SIGINT, and
+    # cinta keeps waiting for the report.
+    def forward(signum, frame):
+        if process.poll() is None:
+            process.send_signal(signal.SIGINT)
+
+    previous = {sig: signal.signal(sig, forward) for sig in (signal.SIGINT, signal.SIGTERM)}
+    report_lines: list[str] = []
     try:
-        stdout, stderr = process.communicate()
-    except KeyboardInterrupt:
-        # Ctrl-C reaches cintarec too, and it needs to finish writing the file
-        # rather than be killed: an unfinished .mov has no moov atom and will not
-        # play. So wait for it instead of tearing it down.
-        stdout, stderr = process.communicate()
+        for line in process.stdout:
+            event = _started_event(line)
+            if event is None:
+                report_lines.append(line)
+            elif on_started is not None:
+                on_started(event)
+        process.wait()
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+    drain.join()
+    stdout, stderr = "".join(report_lines), "".join(stderr_lines)
 
     if process.returncode != 0:
         message, hint = RECORDER_EXIT_CODES.get(
@@ -163,3 +190,13 @@ def run_recorder(arguments: list[str]) -> dict:
         return json.loads(stdout)
     except json.JSONDecodeError as error:
         raise CintaError(f"The recorder returned output that is not JSON: {error}") from error
+
+
+def _started_event(line: str) -> dict | None:
+    if not line.startswith('{"event":'):
+        return None
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return event if event.get("event") == "started" else None

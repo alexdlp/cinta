@@ -80,6 +80,10 @@ def fake_recorder(monkeypatch):
         output = kwargs["output"]
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(b"pretend this is a movie")
+        if kwargs.get("on_started"):
+            kwargs["on_started"](
+                {"event": "started", "path": str(output), "startedAt": "2026-09-27T12:00:00Z"}
+            )
         return {
             "path": str(output),
             "durationSeconds": 5.0,
