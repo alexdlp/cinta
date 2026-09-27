@@ -1,4 +1,4 @@
-"""Where output goes (DESIGN.md 4.0).
+"""Where output goes (DESIGN.md 3.0).
 
 One directory for everything the tool produces, because a single run can emit
 several files and splitting them by type would scatter one job's results.
@@ -34,7 +34,18 @@ def models_dir() -> Path:
     from_env = os.environ.get("CINTA_MODELS_DIR")
     if from_env:
         return Path(from_env).expanduser()
-    return output_dir() / "models"
+
+    configured = load_config().get("models_dir")
+    if configured:
+        return Path(str(configured)).expanduser()
+
+    # Deliberately NOT output_dir(): that follows --output-dir and
+    # $CINTA_OUTPUT_DIR, so writing one recording somewhere else would move the
+    # models with it and trigger a 3 GB re-download. Models move only when asked
+    # to, through $CINTA_MODELS_DIR or config.toml.
+    configured_output = load_config().get("output_dir")
+    base = Path(str(configured_output)).expanduser() if configured_output else DEFAULT_OUTPUT_DIR
+    return base / "models"
 
 
 def output_dir(override: str | Path | None = None) -> Path:

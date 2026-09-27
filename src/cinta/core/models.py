@@ -7,7 +7,6 @@ Homebrew does not install. So cinta does what that script did: two fixed URLs.
 """
 
 import os
-import shutil
 import sys
 import urllib.error
 import urllib.request
@@ -138,13 +137,3 @@ def _copy_with_progress(response, handle, already: int, total: int) -> None:
                 )
     if total and os.isatty(2):
         print("", file=sys.stderr)
-
-
-def remove_all() -> int:
-    """Delete the models. Returns how many bytes were freed."""
-    directory = config.models_dir()
-    if not directory.is_dir():
-        return 0
-    freed = sum(f.stat().st_size for f in directory.rglob("*") if f.is_file())
-    shutil.rmtree(directory)
-    return freed
