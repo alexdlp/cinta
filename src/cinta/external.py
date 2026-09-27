@@ -7,7 +7,7 @@ import shutil
 import signal
 import subprocess
 import sys
-import threading
+import tempfile
 from collections import deque
 from pathlib import Path
 
@@ -145,37 +145,38 @@ def run_recorder(arguments: list[str], on_started=None) -> dict:
     only when something goes wrong.
     """
     command = [str(recorder_path()), *arguments]
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-    # Read concurrently: a full stderr pipe would block cintarec mid-recording.
-    stderr_lines: list[str] = []
-    drain = threading.Thread(target=lambda: stderr_lines.extend(process.stderr), daemon=True)
-    drain.start()
-
-    # Stopping cinta must stop cintarec, and cleanly: it has to finish writing
-    # the file, or the .mov has no moov atom and will not play. Ctrl-C in a
-    # terminal reaches both processes, but a program that signals cinta alone
-    # reaches only this one. So both signals are passed on, as SIGINT, and
-    # cinta keeps waiting for the report.
-    def forward(signum, frame):
-        if process.poll() is None:
-            process.send_signal(signal.SIGINT)
-
-    previous = {sig: signal.signal(sig, forward) for sig in (signal.SIGINT, signal.SIGTERM)}
+    # stderr goes to a file, not a pipe read by a second thread: with only the
+    # main thread alive, a signal from outside always lands where Python runs
+    # its handler. With two, macOS may hand it to the other one, and the main
+    # thread, blocked reading stdout, would never forward it.
     report_lines: list[str] = []
-    try:
-        for line in process.stdout:
-            event = _started_event(line)
-            if event is None:
-                report_lines.append(line)
-            elif on_started is not None:
-                on_started(event)
-        process.wait()
-    finally:
-        for sig, handler in previous.items():
-            signal.signal(sig, handler)
-    drain.join()
-    stdout, stderr = "".join(report_lines), "".join(stderr_lines)
+    with tempfile.TemporaryFile(mode="w+") as log:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=log, text=True)
+
+        # Stopping cinta must stop cintarec, and cleanly: it has to finish writing
+        # the file, or the .mov has no moov atom and will not play. Ctrl-C in a
+        # terminal reaches both processes, but a program that signals cinta alone
+        # reaches only this one. So both signals are passed on, as SIGINT, and
+        # cinta keeps waiting for the report.
+        def forward(signum, frame):
+            if process.poll() is None:
+                process.send_signal(signal.SIGINT)
+
+        previous = {sig: signal.signal(sig, forward) for sig in (signal.SIGINT, signal.SIGTERM)}
+        try:
+            for line in process.stdout:
+                event = _started_event(line)
+                if event is None:
+                    report_lines.append(line)
+                elif on_started is not None:
+                    on_started(event)
+            process.wait()
+        finally:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
+        log.seek(0)
+        stderr = log.read()
+    stdout = "".join(report_lines)
 
     if process.returncode != 0:
         message, hint = RECORDER_EXIT_CODES.get(

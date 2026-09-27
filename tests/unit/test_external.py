@@ -5,7 +5,7 @@ import json
 import os
 import signal
 import stat
-import threading
+import subprocess
 
 import pytest
 
@@ -120,8 +120,10 @@ def test_a_signal_to_cinta_stops_the_recorder_cleanly(monkeypatch, tmp_path, sen
     monkeypatch.setenv("CINTA_RECORDER", str(recorder))
     before = signal.getsignal(sent)
 
+    # From another process, as a program driving cinta would: a signal raised
+    # inside this one would favour the thread that raised it.
     def stop(event):
-        threading.Timer(0.3, os.kill, (os.getpid(), sent)).start()
+        subprocess.Popen(["sh", "-c", f"sleep 0.3; kill -{sent.name[3:]} {os.getpid()}"])
 
     report = external.run_recorder([], on_started=stop)
 
