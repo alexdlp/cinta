@@ -4,7 +4,7 @@
 > layout). None of the commands are implemented yet.
 > Decisions made: distribution through a **Homebrew tap**, a single **`cinta` CLI with
 > subcommands**, a Swift recorder capturing **video + audio**, **uv** as the project manager,
-> and a scope of **download + transcribe + batch + record + models**.
+> and a scope of **devices + download + record + transcribe**.
 
 ## What `cinta` does
 
@@ -15,9 +15,10 @@ one way out:
 |---|---|---|
 | **In, from the internet** | `cinta download` | Audio or video from any site `yt-dlp` supports |
 | **In, from your own screen** | `cinta record` | A screen recording with system audio and/or microphone |
-| **Out, as text** | `cinta transcribe`, `cinta batch` | A transcript of any media, local or remote |
+| **Out, as text** | `cinta transcribe` | A transcript of any media, local or remote |
 
-Supporting cast: `cinta models` manages the Whisper models the transcription runs on.
+Transcription runs on a Whisper model that cinta fetches by itself the first time it is
+needed; there is nothing to install or choose.
 
 Two properties worth stating up front, because they drive most of the design:
 
@@ -27,37 +28,11 @@ Two properties worth stating up front, because they drive most of the design:
 
 ---
 
-## 1. Starting point and what fails today
-
-| Script | What it does | Why it resists packaging |
-|---|---|---|
-| `media_download` | yt-dlp as a Python library | A Python dependency that changes every week |
-| `media_transcribe` | Loads `media_download` with `SourceFileLoader` | Coupled by file path; not a real import |
-| `whisper` | Bash wrapper around `whispercpp` | Hardcoded `~/whisper.cpp/models/*.bin` paths |
-| `whisper_here` | ffmpeg + whisper loop over the cwd | Only works in the cwd, no per-file error handling |
-| `whispercpp` | **Symlink to `/Users/alexdelapuente/whisper.cpp/build/bin/whisper-cli`** | Impossible to distribute |
-| `record_screen` | Drives OBS over WebSocket | OBS opened by hand, WebSocket enabled by hand, input name hardcoded in Spanish, **password in cleartext in the source** |
-
-Three real blockers to "anyone can use this":
-
-1. **The `whispercpp` symlink and the `~/whisper.cpp/` paths** are specific to one machine.
-2. **OBS** requires manual setup and cannot be automated reliably.
-3. **There was no project**: no git, no tests, no package metadata, no license.
-
-Note: the repository had no git history when this was written, which is a piece of luck — the
-OBS WebSocket password (`record_screen:20`) disappears with the file and never enters the
-history. The old scripts were moved out of the repository *before* the first commit, not after.
-
-Note 2: the old README documented `udemy_scan`, but **that script did not exist in the
-directory**. It is out of scope and was dropped along with the old README.
-
----
-
-## 2. Design principles
+## 1. Design principles
 
 1. **One compiled binary.** The only thing that gets compiled is the Swift recorder. Everything
    else is pure Python.
-2. **Zero Python runtime dependencies.** See §7: this turns the Homebrew formula into something
+2. **Zero Python runtime dependencies.** See §6: this turns the Homebrew formula into something
    that needs no maintenance when the external tools are updated. The only *build* dependency
    is `flit_core`, which has no transitive dependencies.
 3. **External tools are Homebrew dependencies**, not vendored: `ffmpeg`, `yt-dlp`,
@@ -73,11 +48,11 @@ directory**. It is out of scope and was dropped along with the old README.
 
 ---
 
-## 3. Repository layout
+## 2. Repository layout
 
 ```
 cinta/
-├── pyproject.toml              # no [build-system] until packaging (§7.2)
+├── pyproject.toml              # flit_core build backend (§6.2)
 ├── README.md                   # user-facing
 ├── DESIGN.md                   # this document
 ├── CHANGELOG.md
@@ -90,12 +65,11 @@ cinta/
 │   ├── duration.py             # '30s' / '5m' / '1h30m' -> seconds
 │   ├── errors.py               # CintaError -> exit codes
 │   ├── external.py             # THE ONLY place that spawns subprocesses
-│   ├── ui.py                   # progress, colors, --json/--quiet modes
+│   ├── ui.py                   # sizes, durations, stderr narration
 │   ├── commands/
 │   │   ├── devices.py
 │   │   ├── download.py
 │   │   ├── transcribe.py
-│   │   ├── batch.py
 │   │   ├── record.py
 │   │   └── models.py
 │   └── core/
@@ -125,27 +99,22 @@ cinta/
 └── packaging/homebrew/cinta.rb   # copied into the tap
 ```
 
-Removed from the repository: `whispercpp` (symlink), `whisper`, `whisper_here`,
-`media_download`, `media_transcribe`, `record_screen`. They are kept outside the repository as
-a reference while their logic is ported, and deleted once it is.
-
 ---
 
-## 4. The `cinta` CLI
+## 3. The `cinta` CLI
 
 A single entry point. `pyproject.toml` declares `cinta = "cinta.cli:main"`.
 
 ```
-cinta [--json] [--quiet] [-v] <subcommand> ...
+cinta [--json] <subcommand> ...
 
   devices                  List screens and microphones
   download    URL          Download audio or video
-  transcribe  [PATHS...]   Transcribe media into text
+  transcribe  FILE... |URL Transcribe media into text
   record      [DURATION]   Record the screen
-  record      [DURATION]   Record the screen
-  models      <action>     Manage Whisper models
-  version
 ```
+
+`--version` is a flag, not a subcommand.
 
 **Durations always carry a unit**: `30s`, `5m`, `1h30m`. A bare number is refused rather than
 interpreted. The two plausible readings of `15` are sixty times apart, and a duration is only
@@ -153,7 +122,7 @@ ever typed when the recording is about to be left unattended, so the error names
 instead of guessing. The unit is parsed once in `duration.py` and every command that takes a
 length of time uses it.
 
-### 4.0 Where output goes and what it is called
+### 3.0 Where output goes and what it is called
 
 **One destination directory for everything the tool produces: `~/cinta/`, flat.**
 
@@ -161,8 +130,7 @@ The reason it is not split by file type is that a single run produces several fi
 `cinta transcribe URL` writes the media, the `.txt` and the `.srt`; `cinta record` may later
 write a `.mov` plus a sidecar. Sending video to `~/Movies`, audio to `~/Music` and text to
 `~/Documents` would tear one job's results across three folders. They share a filename stem
-instead, which keeps them adjacent in any sorted listing. `~/Desktop` is rejected for the
-obvious reason: screen recordings run about 15 MB per minute and the desktop is visible.
+instead, which keeps them adjacent in any sorted listing.
 
 Resolution order for the destination:
 
@@ -176,11 +144,11 @@ Naming contract:
 
 | Command | Produces | Name |
 |---|---|---|
-| `download --type audio` | `.mp3` | `<title>.mp3`, the title from yt-dlp, sanitized |
-| `download --type video` | `.mp4` / `.mkv` | `<title>.<ext>` |
+| `download` | `.mp4` | `<title>.mp4`, the title from yt-dlp, sanitized |
+| `download --audio` | `.mp3` | `<title>.mp3` |
 | `record` | `.mov` | `<YYYY-MM-DD>-<HHMMSS>-<display>.mov` |
 | `transcribe` | media + `.txt` + `.srt` | the media's stem, reused for the sidecars |
-| `batch` | `.txt` + `.srt` per input | the input's stem |
+| `transcribe FILE` | `.txt` + `.srt` | the input's stem |
 
 Rules that apply to all of them:
 
@@ -189,73 +157,89 @@ Rules that apply to all of them:
   trimmed (they break on other filesystems).
 - **Never overwrite silently.** An existing destination is an error (exit code 13) unless
   `--force` is given.
-- One job's outputs **share a stem**. That is the whole organizing principle; there are no
-  per-type subdirectories, and no per-job subdirectory either — a folder holding a single
-  `.mp3` is worse than a flat listing.
+- One job's outputs **share a stem**, and **a job that produces several files puts them in a
+  folder** named after that stem. One file stays loose: a folder holding a single `.mp3` is
+  ceremony. Twenty recordings that were also transcribed would otherwise be sixty loose files.
 
-Open question: `batch` takes local files as input, and today's `whisper_here` writes next to
-them (`./transcripciones`). Writing those transcripts to `~/cinta/` instead means transcribing
-`~/lectures/*.mp4` scatters the results away from the videos. Leaning towards: `batch` defaults
-to writing beside each input file, because there the user already chose a location. To be
-confirmed when `batch` is implemented.
+  The `.txt` and `.srt` pair counts as **one** result for this rule. They are the same
+  transcript in two formats, share a stem and sort together, so `cinta transcribe URL` leaves
+  them loose. A folder appears when there is media *and* a transcript, or when a playlist
+  produces many files.
 
-### 4.1 `cinta download`
+| Command | Produces | Layout |
+|---|---|---|
+| `record` | one `.mov` | loose |
+| `record --transcribe` | `.mov` + `.txt` + `.srt` | folder |
+| `download` | one file | loose |
+| `download --playlist` | many files | folder, named by the playlist |
+| `download --transcribe` | media + transcript | folder |
+| `transcribe FILE` | `.txt` + `.srt` | beside the input |
+| `transcribe URL` | `.txt` + `.srt` | loose |
+| `transcribe URL --keep` | audio + transcript | folder |
 
-```
-cinta download URL [--type audio|video] [--output-dir DIR] [--playlist]
-                [--keep-temp] [--compatible] [--format SELECTOR]
-```
+Transcribing a local file is the exception to all of this: its `.txt` and `.srt` are written
+beside the file itself, not into `~/cinta`. That folder was chosen by the user, and separating
+a transcript from the video it describes helps nobody. `--output-dir` overrides it.
 
-The same flags as today plus one new one (`--format`, an escape hatch to pass a raw yt-dlp
-selector). Default behaviour is unchanged: `audio` as MP3 in `~/Desktop`.
-
-**One important internal change.** Today `final_paths_from_info()` *infers* the final path by
-reimplementing yt-dlp's post-processing logic — and gets it wrong the moment yt-dlp changes
-anything. It is replaced by asking yt-dlp directly:
-
-```
-yt-dlp --print after_move:filepath --no-simulate ...
-```
-
-That returns the real path of each file after post-processing, one per line. Less code, no
-guessing. Metadata (title, channel, date, duration) comes from `--print-json` in the same pass,
-so there is no second network request.
-
-### 4.2 `cinta transcribe`
+### 3.1 `cinta download`
 
 ```
-cinta transcribe URL [--type audio|video] [--output-dir DIR] [--compatible]
-                  [--keep] [--keep-wav] [--lang es|auto] [--model NAME]
+cinta download URL [--audio] [--output-dir DIR] [--playlist]
+                [--compatible] [--transcribe] [--format SELECTOR]
 ```
 
-Pipeline: `download` → (if needed) `ffmpeg` to 16 kHz mono WAV → `whisper-cli` → prepend the
-metadata header to the `.txt`. Same as today, except:
+Video by default: downloading is for keeping the thing, and wanting only the sound is the
+special case. `--audio` is that case, and produces an MP3 a tenth of the size. `--format` is an
+escape hatch for passing a raw yt-dlp selector when the defaults are wrong.
 
-- `download` is **imported** instead of being loaded with `SourceFileLoader`.
-- `--lang` and `--model` stop being hardcoded in the bash wrapper.
-- If yt-dlp returns several files, they are transcribed in sequence instead of `sys.exit(1)`.
-
-### 4.3 `cinta transcribe` absorbs what was going to be `cinta batch`
-
-The plan had two commands split by where the input came from: `transcribe URL` and
-`batch PATHS`. That split is an implementation detail leaking into the interface — from the
-outside both are "turn this into text", and nobody remembers which verb takes which kind of
-argument. One command takes any number of arguments; a URL is just another kind of argument
-once `download` exists. Multiple files is not a separate mode, it is several arguments.
-
-### 4.3b The old `cinta batch` design, kept for its error handling
+**The written paths are asked for, not predicted.** Inferring them means reimplementing
+yt-dlp's post-processing rules and getting them wrong the moment yt-dlp changes anything, so
+yt-dlp is asked directly:
 
 ```
-cinta batch [PATHS...] [--ext mp4] [--output-dir DIR] [--jobs N] [--skip-existing]
+yt-dlp --print-to-file after_move:filepath PATHS_FILE ...
 ```
 
-Successor to `whisper_here`. With no arguments it behaves exactly as today (`*.mp4` from the
-cwd into `./transcripciones`), but it accepts explicit paths and globs, `--skip-existing` to
-resume an interrupted batch, and one failing file no longer aborts the rest: it is recorded and
-the run continues. The final summary lists successes and failures, and the exit code is nonzero
-if there was any failure.
+`after_move:filepath` is the name on disk once everything has finished, including the mp3
+conversion that renames the file. Writing it to a *file* rather than to stdout matters:
+**yt-dlp puts its progress bar on stdout**, so anything printed there arrives mixed into it.
+The same trap caught `whisper-cli` (§5.1); both tools' output is relayed to stderr so that
+cinta's stdout carries only paths, which is what makes this work:
 
-### 4.4 `cinta record`
+```bash
+cinta transcribe "$(cinta download URL)"
+```
+
+**No retry on an unavailable format.** Every selector chain already ends in `best`, so the
+fallback happens inside yt-dlp. A failure that survives that would survive a retry too.
+
+**`file://` URLs are enabled only when one is given.** yt-dlp refuses them by default, on the
+grounds that a URL arriving from an untrusted source could then read the disk. A URL the user
+typed is a different matter, and it is what makes the integration test in §7 possible without
+the network.
+
+### 3.2 `cinta transcribe`
+
+```
+cinta transcribe FILE... | URL  [--lang es|auto] [--keep] [--output-dir DIR] [--force]
+```
+
+Pipeline: (download, for a URL) → `ffmpeg` to 16 kHz mono WAV → `whisper-cli` → `.txt` and
+`.srt`. There is no `--model`: there is one model (§5).
+
+**Files or a URL, not both in one command**, and one URL at a time. Not a technical limit: the
+two behave differently enough — one downloads first, the others do not — that mixing them in a
+single command invites surprises. Several files at once is the case that matters, because
+transcribing a course that was downloaded lesson by lesson is the main use, and a file that
+fails in the middle of that must not discard the ones that already succeeded.
+
+A URL downloads the **audio** only. Whisper needs the sound, and the video is ten times the
+size for nothing. The audio is then discarded, because what was asked for is the text. `--keep`
+keeps it, and since the job then produces media *and* a transcript, they go into a folder
+together. Wanting the video as well is a different intent with its own command:
+`cinta download --transcribe`.
+
+### 3.3 `cinta record`
 
 ```
 cinta record [DURATION] [--output FILE | --output-dir DIR]
@@ -288,52 +272,21 @@ cinta record [DURATION] [--output FILE | --output-dir DIR]
   practice: on the development machine index 1 and id 1 are different screens. Indices are
   renumbered when a monitor is plugged in, ids are not. Names come from
   `NSScreen.localizedName`; `SCDisplay` does not carry one.
-- It fully replaces `record_screen`: OBS, `obsws-python`, `tqdm`, port 4455 and the hardcoded
-  password all go away.
 
-### 4.5 `cinta models`
+## 4. The native recorder: `cintarec` (Swift + ScreenCaptureKit)
 
-```
-cinta models list                    # catalog + which ones you have and how big they are
-cinta models download NAME           # download with a progress bar and resumption
-cinta models path [NAME]             # print the resolved path (for scripts)
-cinta models remove NAME
-cinta models verify [NAME]           # check SHA-256 against the catalog
-```
-
-The catalog ships **embedded in the package** as a TOML file: name, Hugging Face URL, size and
-expected SHA-256. The network is never used to "discover" models, only to fetch them.
-
-Concrete decisions:
-
-- **Resumable downloads.** `large-v3` is ~3 GB; a download that dies at 80% and restarts from
-  zero is unacceptable. HTTP `Range` over a `.part` file, renamed on completion. Implemented
-  with stdlib `urllib` — no need for `requests`, which keeps the zero-dependency rule.
-- **Mandatory SHA-256 verification** before renaming the `.part`. A truncated model makes
-  `whisper-cli` fail with an incomprehensible error; better to catch it at download time.
-- **The VAD model is in the catalog** (`silero-v5.1.2`), because the default transcription
-  profile uses it (§6) and today it is assumed to exist under `~/whisper.cpp`.
-- **How it ties into the rest of the CLI:** when `cinta transcribe` or `cinta batch` cannot find
-  the model, the error is not a stack trace but `missing model 'large-v3'; run: cinta models
-  download large-v3`. That is the reason this subcommand is in scope at all.
-- `cinta models list --json` so it can be scripted.
-
----
-
-## 5. The native recorder: `cintarec` (Swift + ScreenCaptureKit)
-
-### 5.1 Why ScreenCaptureKit and nothing else
+### 4.1 Why ScreenCaptureKit and nothing else
 
 | Option | Verdict |
 |---|---|
 | **ScreenCaptureKit** | ✅ System audio **without drivers** (no BlackHole). Capture by display, window or app. Hardware encoding. Requires macOS 13. **Chosen.** |
 | `screencapture -V` | Built into the system, but no system audio and no fine-grained control. Useful only as a fallback. |
-| `ffmpeg -f avfoundation` | Needs a loopback device (BlackHole) for system audio. Reintroduces manual installation: exactly the OBS problem. |
+| `ffmpeg -f avfoundation` | Needs a loopback device such as BlackHole for system audio, which means asking the user to install and configure a kernel extension. |
 
 The development machine runs macOS 26.6.2 and Swift 6.4, so this is comfortable. The macOS 13
 floor is there for other users, not for it.
 
-### 5.2 Architecture of the binary
+### 4.2 Architecture of the binary
 
 `cintarec` is a SwiftPM executable with **no external dependencies** (arguments parsed by hand,
 no `swift-argument-parser`). Reason: Homebrew builds run in a sandbox with no network, and an
@@ -395,13 +348,12 @@ Key pieces and their traps:
   `finishWriting(completionHandler:)` before exiting. That is the difference between "Ctrl-C
   leaves you the video" and "Ctrl-C leaves you garbage".
 
-### 5.3 Audio, specifically
+### 4.3 Audio, specifically
 
 The recorder captures video **and** audio:
 
 - `--audio system` (default): system audio through ScreenCaptureKit. A single AAC track.
-  **One TCC permission only** (Screen Recording). It is what OBS did with the "macOS Screen
-  Capture" input, without OBS.
+  **One TCC permission only** (Screen Recording).
 - `--audio mic`: microphone through `AVCaptureSession`, on a separate track. Which device is
   a real choice, unlike system audio, so `cinta devices` enumerates input devices and `--mic`
   selects one by index or `id:UID`. The capture side is forced to mono 16-bit 48 kHz so the
@@ -421,7 +373,7 @@ The recorder captures video **and** audio:
   copied, not re-encoded.
 - `--audio none`: video only.
 
-### 5.4 Permissions (TCC) — the important surprise
+### 4.4 Permissions (TCC) — the important surprise
 
 **Screen Recording permission is not granted to `cintarec`, it is granted to your terminal.**
 macOS attributes the permission to the "responsible process", which is Terminal.app / iTerm2 /
@@ -441,10 +393,10 @@ Ghostty / VS Code. Design consequences:
   executable with no plist cannot request the permission. Attribution still belongs to the
   terminal.
 
-**This counts in favour of the design over OBS**, not against it: granted once per terminal and
-done. But it has to be documented well in the README or first use will be confusing.
+Granted once per terminal and done, but it has to be documented well in the README or first
+use will be confusing.
 
-### 5.5 Contract with the Python layer
+### 4.5 Contract with the Python layer
 
 `cintarec` is a Unix tool: **stdout = JSON, stderr = human logs**, meaningful exit codes.
 `core/recorder.py` never parses free-form text.
@@ -478,11 +430,9 @@ a fake `cintarec` that prints fixture JSON.
 
 ---
 
-## 6. Resolving `whisper` and its models
+## 5. Resolving `whisper` and its models
 
-The `whispercpp` symlink and the `~/whisper.cpp/` paths are gone.
-
-- **The binary**: Homebrew installs the `whisper.cpp` formula (v1.9.4 today), which provides
+- **The binary**: Homebrew installs the `whisper.cpp` formula, which provides
   `whisper-cli` on the PATH. `external.py` looks for it on the PATH and, as a fallback, in
   `$(brew --prefix)/bin`.
 - **The models**: two of them, pinned in the source, with no catalogue and no `--model` flag.
@@ -506,7 +456,15 @@ The `whispercpp` symlink and the `~/whisper.cpp/` paths are gone.
   Downloads resume: 3 GB that dies at 80% must not start over, so bytes land in a `.part` file
   continued with a `Range` request.
 
-- **Where they live**: `~/cinta/models/`, overridable with `$CINTA_MODELS_DIR`.
+- **Where they live**: `~/cinta/models/`, overridable with `$CINTA_MODELS_DIR` or a
+  `models_dir` in `config.toml`.
+
+  **It does not follow `--output-dir` or `$CINTA_OUTPUT_DIR`**, and that distinction cost a
+  3 GB download to discover. Those two are per-invocation and per-session overrides — writing
+  one recording to an external disk should not relocate the model directory, find it empty and
+  download everything again. Models move only when asked to move. A `models_dir` in
+  `config.toml`, or an `output_dir` there, does move them: a standing preference is a
+  different thing from a flag.
 
   whisper.cpp has no opinion — its `-m` default is `models/ggml-base.en.bin`, a path relative to
   the working directory, left over from running inside the source tree. So the location is
@@ -518,19 +476,18 @@ The `whispercpp` symlink and the `~/whisper.cpp/` paths are gone.
   number. `brew upgrade whisper.cpp` would delete 3 GB and give nothing back — the formula has
   no models to replace them with.
 
-- The options currently hardcoded in the bash wrapper (`--vad`, `--temperature 0`, `-mc 0`,
-  `-sns`, `--max-len 192`, `--vad-threshold 0.7`, `-l auto`, `-pp`) become the **default
-  profile** in `config.toml`, overridable by flags. Nothing is lost, control is gained.
+- **The profile**: `--vad`, `--temperature 0`, `-mc 0`, `-sns`, `--max-len 192`,
+  `--vad-threshold 0.7`, `-l auto`, `-pp`. Tuned rather than default: whisper-cli's own
+  defaults hallucinate through silence and repeat themselves on long recordings.
 
-Models are managed by `cinta models` (§4.5), which writes to level 4 of that list. The install
-path requires no downloads: `brew install` leaves the tool usable, and
-`cinta models download large-v3` leaves it complete.
+Nothing has to be installed by hand: `brew install cinta` leaves the tool usable, and the
+first transcription fetches what it needs.
 
 `cinta doctor` is out of scope. Its useful parts are distributed where they belong: the
-permission check lives in the `cintarec` preflight (§5.4), and a missing model is not something
+permission check lives in the `cintarec` preflight (§4.4), and a missing model is not something
 to check for because cinta fetches it.
 
-### 6.1 Reading whisper-cli's output
+### 5.1 Reading whisper-cli's output
 
 `whisper-cli` writes its transcript to **stdout** and roughly 150 lines of backend and timing
 detail to stderr, for a ten-second clip. Inheriting the terminal would put the transcript in the
@@ -543,9 +500,9 @@ ggml and Metal, below whisper-cli's own printing.
 
 ---
 
-## 7. Packaging: uv for development, Homebrew for distribution
+## 6. Packaging: uv for development, Homebrew for distribution
 
-### 7.1 What uv does here and what it does not
+### 6.1 What uv does here and what it does not
 
 Two things get confused and must be separated: **uv as the project manager** (development) and
 **uv as an installation mechanism** (what runs on the user's machine). uv is excellent at the
@@ -568,11 +525,11 @@ up a conda or brew interpreter by accident.
 `.python-version` pins the interpreter and `uv.lock` locks the development dependencies
 (pytest, ruff). Runtime dependencies are still zero, so `uv.lock` only describes the working
 environment. `uv run` does not require anything to be activated, which means the miniconda
-`python3` that currently wins on PATH is irrelevant to this project (§7.6). On top of that,
+`python3` that wins on PATH is irrelevant to this project (§6.6). On top of that,
 `[tool.uv] python-preference = "only-managed"` in `pyproject.toml` makes it impossible to pick
 up a conda or brew interpreter by accident.
 
-### 7.2 The build backend: why `flit_core` and not `uv_build`
+### 6.2 The build backend: why `flit_core` and not `uv_build`
 
 The natural choice would be uv's own backend. **It was tried and it breaks Homebrew
 installation.** Homebrew builds run without network access, and the install step is a
@@ -593,23 +550,7 @@ wheel in the formula, but that drags in a 40 MB build dependency to save a six-l
 the formula. `hatchling` would work too, at the cost of five `resource` blocks instead of one;
 the only option ruled out on technical grounds is `uv_build`.
 
-**This was originally deferred, and the deferral was wrong.** The plan was to ship no
-`[build-system]` at all until packaging day, on the grounds that `uv sync` works without one —
-which is true, uv treats such a project as "virtual" and does not build it. What that misses is
-that a virtual project is never *installed* into the venv, so with a `src/` layout there is no
-`cinta` executable and no importable `cinta` module. In practice that meant:
-
-- `uv run cinta` — the obvious thing to type — failed with "Failed to spawn: `cinta`".
-- `uv run python -m cinta` failed too, needing a `PYTHONPATH=src` prefix wrapped in a Makefile.
-- Running the CLI from anywhere else needed a 140-character shell alias.
-- `pytest` needed `pythonpath = ["src"]` to see the package at all.
-
-The fix is three lines of `pyproject.toml` and it deletes all four workarounds. The lesson is
-narrow and worth keeping: deferring the build backend is only free for a library nobody runs
-from the command line. For a project whose whole point is a command, the backend is what makes
-the command exist, so it belongs in from the start.
-
-### 7.3 The other decision that simplifies everything
+### 6.3 The other decision that simplifies everything
 
 Homebrew installs Python packages with `virtualenv_install_with_resources`, which requires
 **every transitive Python dependency** to be declared as a `resource` block in the formula.
@@ -630,7 +571,7 @@ What it costs: yt-dlp metadata arrives as JSON instead of as a Python object (on
 trivial), and zsh completions have to be written by hand instead of generated by Typer (~40
 lines of `compdef`, done once).
 
-### 7.4 Formula skeleton
+### 6.4 Formula skeleton
 
 ```ruby
 class Cinta < Formula
@@ -672,15 +613,17 @@ class Cinta < Formula
         Settings -> Privacy & Security -> Screen Recording -> enable your terminal
         and restart it.
 
-      Whisper models are not bundled (~3 GB). To transcribe:
-        cinta models download large-v3
+      The Whisper model (~3 GB) is downloaded the first time you transcribe
+      something. It is not removed when you uninstall cinta; to reclaim
+      the space:
+        rm -rf ~/cinta/models
     EOS
   end
 
   test do
     assert_match version.to_s, shell_output("#{bin}/cinta version")
     assert_match "usage", shell_output("#{bin}/cinta --help")
-    assert_match "large-v3", shell_output("#{bin}/cinta models list")  # catalog, no network
+    assert_match "Screens", shell_output("#{bin}/cinta devices 2>&1", 10)  # no TCC, exits 10
     system libexec/"cintarec", "--version"   # needs no TCC
   end
 end
@@ -689,7 +632,7 @@ end
 `cintarec` goes into `libexec/` rather than `bin/`: it is an implementation detail, not a public
 tool. `cinta` locates it through the `CINTA_RECORDER` variable.
 
-### 7.5 Installation and uninstallation
+### 6.5 Installation and uninstallation
 
 ```bash
 brew tap alexdlp/tap
@@ -704,13 +647,14 @@ documented:
 - `~/.config/cinta/` (configuration)
 - `~/Library/Application Support/cinta/models/` (models, the gigabytes)
 
-The README will include the `rm -rf` line for full removal. `cinta models remove --all` handles
-the heavy part (the gigabytes of models) safely before uninstalling.
+The README and the formula's caveats both state the `rm -rf ~/cinta` line for full removal.
+There is no `cinta` command for it: uninstalling is Homebrew's job, and Homebrew deliberately
+leaves user data alone.
 
-### 7.6 Taking miniconda out of the equation
+### 6.6 Taking miniconda out of the equation
 
-Verified on the development machine: `/opt/homebrew/Caskroom/miniconda/base/bin` comes **before**
-`/opt/homebrew/bin` on PATH, so today `python3` and `yt-dlp` resolve to conda's. This affects
+A miniconda installation puts `/opt/homebrew/Caskroom/miniconda/base/bin` **before**
+`/opt/homebrew/bin` on PATH, so `python3` and `yt-dlp` resolve to conda's copies. This affects
 the design in two separate places:
 
 **In development the problem disappears on its own:** uv uses its own CPython
@@ -735,20 +679,21 @@ comes first or last. And it stays overridable if some day you want to point at a
 
 ---
 
-## 8. Tests
+## 7. Tests
 
 Target: ~80% on `src/cinta/core/`. The rule is that **everything touching the outside world
 lives in `external.py`** and is replaced by a double in tests.
 
 **Unit** (fast, no network, no subprocesses):
 
-- yt-dlp format selectors: `--type video --compatible` produces the H.264/AAC string.
+- yt-dlp format selectors: `--compatible` produces the H.264/AAC chain, and it still ends in
+  the generic fallback.
 - argv construction, with snapshots: ffmpeg to WAV, `whisper-cli`, `cintarec`. Catches flag
   regressions without executing anything.
 - Parsing the JSON from `yt-dlp --print-json` → metadata header (including the awkward cases
   the current code already handles: malformed `upload_date`, `duration` of `None`).
 - Parsing the `cintarec` JSON and mapping its exit codes to errors with useful messages.
-- Model resolution: the 5 precedence levels from §6.
+- Model handling: the two files are pinned, and one already on disk is never downloaded again.
 - Output path derivation and filename sanitization.
 
 **Integration** (marked `@pytest.mark.integration`, outside the fast loop):
@@ -757,8 +702,8 @@ lives in `external.py`** and is replaced by a double in tests.
   (75 MB, cached in CI) → assert that non-empty `.txt` and `.srt` come out.
 - `cinta download` against a local **`file://` URL** (yt-dlp supports them) to exercise the full
   pipeline without depending on YouTube or the network.
-- `cinta batch` over a temporary directory with 3 files, one of them corrupt: verifies the other
-  two are processed and the exit code is nonzero.
+- `cinta transcribe` over three files, one of them corrupt: verifies the other two are
+  processed and the exit code is nonzero.
 
 **Swift** (XCTest):
 
@@ -779,16 +724,11 @@ lives in `external.py`** and is replaced by a double in tests.
 | `swift` | `swift build -c release` + `swift test` |
 | `brew` | `brew install --build-from-source` from the tap + `brew test` + `brew audit --strict` |
 
-Static type checking is deliberately absent. `mypy --strict` over code whose job is to move
-`dict[str, Any]` from a `json.loads` into a subprocess argument list costs more annotation than
-it catches, on a project with one maintainer and no public API. It can be added later if the
-JSON boundaries start causing real bugs.
-
 ---
 
-## 9. Open decisions and risks
+## 8. Open decisions and risks
 
-1. **yt-dlp as a subprocess rather than a library.** Hugely simplifies packaging (§7.3), but it
+1. **yt-dlp as a subprocess rather than a library.** Hugely simplifies packaging (§6.3), but it
    is a real change from the current code. `core/downloader.py` sits behind an interface in case
    it ever has to be reverted.
 2. **Compiling Swift on every install** takes ~1 min and requires the Xcode Command Line Tools.
@@ -811,5 +751,5 @@ JSON boundaries start causing real bugs.
    committing to a long take. Until then, the honest documentation is "use headphones", and the
    default stays system audio only.
 8. **`uv_build` is ruled out as a backend** because of the offline-install incompatibility with
-   Homebrew (§7.2). If Homebrew ever adopts uv for installing Python packages, the decision is
+   Homebrew (§6.2). If Homebrew ever adopts uv for installing Python packages, the decision is
    worth revisiting: it is a two-line change in `pyproject.toml`.

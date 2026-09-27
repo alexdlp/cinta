@@ -172,5 +172,5 @@ let usage = """
 
     On completion a JSON report is written to stdout. Logs go to stderr.
     Arguments are parsed by hand so the binary has no SPM dependencies
-    (DESIGN.md 5.2).
+    (DESIGN.md 4.2).
     """

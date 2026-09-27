@@ -12,7 +12,7 @@ dependencies = []
 cinta = "cinta.cli:main"
 
 # flit_core has no transitive dependencies, which is what keeps the Homebrew
-# formula down to a single resource (DESIGN.md 7.2).
+# formula down to a single resource (DESIGN.md 6.2).
 [build-system]
 requires = ["flit_core>=3.9,<4"]
 build-backend = "flit_core.buildapi"

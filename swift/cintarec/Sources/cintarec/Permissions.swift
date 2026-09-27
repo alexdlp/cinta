@@ -4,7 +4,7 @@ import Foundation
 
 enum Permissions {
     /// macOS grants Screen Recording to the *responsible process*, which is the
-    /// terminal emulator, not this binary (DESIGN.md 5.4). So the message has to
+    /// terminal emulator, not this binary (DESIGN.md 4.4). So the message has to
     /// name the terminal, not cintarec, or the user will look in the wrong place.
     static func preflightScreenCapture() {
         if CGPreflightScreenCaptureAccess() { return }

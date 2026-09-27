@@ -1,6 +1,6 @@
 import Foundation
 
-/// The JSON contract with core/recorder.py (DESIGN.md 5.5).
+/// The JSON contract with core/recorder.py (DESIGN.md 4.5).
 struct AudioTrack: Encodable {
     let kind: String
     let channels: Int

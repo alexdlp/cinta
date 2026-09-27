@@ -9,7 +9,7 @@ class CintaError(Exception):
         self.hint = hint
 
 
-# Exit codes reported by cintarec (DESIGN.md 5.5), mapped to explanations the
+# Exit codes reported by cintarec (DESIGN.md 4.5), mapped to explanations the
 # user can act on. The raw codes are never shown.
 RECORDER_EXIT_CODES = {
     10: (

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Exit codes are part of the contract with the Python layer (DESIGN.md 5.5).
+/// Exit codes are part of the contract with the Python layer (DESIGN.md 4.5).
 /// core/recorder.py maps these to errors with useful messages; it never parses
 /// free-form text.
 enum ExitCode: Int32 {
