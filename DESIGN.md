@@ -443,51 +443,42 @@ a fake `cintarec` that prints fixture JSON.
   one and that is the end of it. When a better model appears, the constant changes, and
   upgrading cinta replaces the file.
 
-  **Why cinta downloads them at all**, given that it is meant to be a thin wrapper: whisper.cpp
-  ships no models. Its Homebrew formula installs the binary and a 562 KB test stub, and its
-  caveats tell you to go and fetch the real thing from a web page. The script that makes this
-  painless (`models/download-ggml-model.sh`) lives in the source repository, which Homebrew does
-  not install — which is why anyone who built from source has models without remembering how.
-  Two fixed URLs is the whole of it:
+  **Why they come with cinta**, given that it is meant to be a thin wrapper: whisper.cpp ships
+  no models. Its Homebrew formula installs the binary and a 562 KB test stub, and its caveats
+  tell you to go and fetch the real thing from a web page. Two fixed URLs is the whole of it:
 
   ```
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin
   https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin
   ```
 
-  Downloads resume: 3 GB that dies at 80% must not start over, so bytes land in a `.part` file
-  continued with a `Range` request.
+- **Installed with cinta, removed with cinta.** The Homebrew formula downloads both during
+  `brew install cinta`, announcing it, into the keg (`libexec/models`), and the wrapper points
+  `$CINTA_MODELS_DIR` there. So the first transcription needs nothing, `brew uninstall cinta`
+  takes the 3 GB with it, and nothing is left for the user to clean up. How the formula does
+  it, and why not with Homebrew resources, is in §6.4.
 
-- **Where they live**: `~/cinta/models/`, overridable with `$CINTA_MODELS_DIR` or a
-  `models_dir` in `config.toml`.
+- **In a source checkout** (`uv run cinta`) there is no formula, so cinta fetches them itself
+  on first use, into `~/cinta/models/`, overridable with `$CINTA_MODELS_DIR` or a `models_dir`
+  in `config.toml`. Downloads resume: 3 GB that dies at 80% must not start over, so bytes land
+  in a `.part` file continued with a `Range` request.
 
-  **It does not follow `--output-dir` or `$CINTA_OUTPUT_DIR`**, and that distinction cost a
-  3 GB download to discover. Those two are per-invocation and per-session overrides — writing
-  one recording to an external disk should not relocate the model directory, find it empty and
-  download everything again. Models move only when asked to move. A `models_dir` in
-  `config.toml`, or an `output_dir` there, does move them: a standing preference is a
-  different thing from a flag.
-
-  whisper.cpp has no opinion — its `-m` default is `models/ggml-base.en.bin`, a path relative to
-  the working directory, left over from running inside the source tree. So the location is
-  cinta's to choose. It goes under the output directory because cinta owns these files' whole
-  life: it downloads them and replaces them on upgrade. One directory
-  for everything, so `rm -rf ~/cinta` leaves nothing behind.
-
-  Rejected: `$(brew --prefix)/share/whisper.cpp/`, because that path contains the version
-  number. `brew upgrade whisper.cpp` would delete 3 GB and give nothing back — the formula has
-  no models to replace them with.
+  That directory does not follow `--output-dir` or `$CINTA_OUTPUT_DIR`. Those are
+  per-invocation and per-session overrides: writing one recording to an external disk must not
+  relocate the models, find the new place empty and download everything again. A `models_dir`
+  or `output_dir` in `config.toml` does move them, since a standing preference is a different
+  thing from a flag.
 
 - **The profile**: `--vad`, `--temperature 0`, `-mc 0`, `-sns`, `--max-len 192`,
   `--vad-threshold 0.7`, `-l auto`, `-pp`. Tuned rather than default: whisper-cli's own
   defaults hallucinate through silence and repeat themselves on long recordings.
 
-Nothing has to be installed by hand: `brew install cinta` leaves the tool usable, and the
-first transcription fetches what it needs.
+Nothing has to be installed by hand: `brew install cinta` leaves the tool usable, models
+included.
 
 `cinta doctor` is out of scope. Its useful parts are distributed where they belong: the
 permission check lives in the `cintarec` preflight (§4.4), and a missing model is not something
-to check for because cinta fetches it.
+to check for because the install provides it.
 
 ### 5.1 Reading whisper-cli's output
 
@@ -593,13 +584,26 @@ What it does and why:
 - **The test** needs no permissions, so it runs anywhere: both versions match the formula, the
   help lists the commands, and `cintarec --fps 0` exits with 20, which proves the binary starts
   and parses before it would ask macOS for anything.
-- **The caveats** say the two things a user cannot guess: the screen recording permission
-  belongs to the terminal, and the 3 GB of models stay after uninstalling.
+- **The models are downloaded in `install`**, with `curl`, into `libexec/models`, each announced
+  with its size and checked against its SHA-256. Not as `resource` blocks: Homebrew keeps a
+  copy of every resource in its download cache, which would be a second 3 GB outliving the
+  install. Not in `post_install` either: it is deprecated in favour of `post_install_steps`,
+  which is a fixed set of file operations and cannot download.
+- **On upgrade the models are not downloaded again.** The installed version is still in the
+  Cellar while the new one installs, so the formula hard-links its copy: instant, no extra
+  space, and the file survives when Homebrew removes the old keg. Only a changed model (a new
+  SHA-256) is fetched. A formula change with no new release is a `revision` bump.
+- **No bottles.** A bottle built from this formula would carry the models, and 3 GB is over
+  GitHub's 2 GB limit per release file. Building from source costs about a minute of
+  `swift build`, small beside the model download the install does anyway.
+- **The caveats** say the one thing a user cannot guess: the screen recording permission
+  belongs to the terminal.
 
 ### 6.5 Installation and uninstallation
 
 ```bash
 brew tap alexdlp/tap        # once
+brew trust alexdlp/tap      # once: Homebrew loads no third-party formula until trusted
 brew install cinta
 brew upgrade cinta
 brew uninstall cinta
@@ -609,15 +613,10 @@ brew uninstall cinta
 projects once they are notable (roughly 75 stars or 30 forks). The tap comes first; the
 formula moves to homebrew-core unchanged when that happens, and the `brew tap` line goes.
 
-Homebrew **never** deletes user data. After uninstalling these remain, and it has to be
-documented:
-
-- `~/.config/cinta/` (configuration)
-- `~/cinta/` (recordings, downloads, transcripts, and the models: the gigabytes)
-
-The README and the formula's caveats both state the `rm -rf ~/cinta` line for full removal.
-There is no `cinta` command for it: uninstalling is Homebrew's job, and Homebrew deliberately
-leaves user data alone.
+`brew uninstall cinta` removes everything cinta installed, the models included. What stays is
+what the user made: recordings, downloads and transcripts in `~/cinta/`, and a
+`~/.config/cinta/config.toml` if they wrote one. Those are documents, and no uninstaller
+deletes documents.
 
 ### 6.6 Taking miniconda out of the equation
 
@@ -714,8 +713,9 @@ same in `pyproject.toml`, `__init__.py` and `main.swift`.
 1. **yt-dlp as a subprocess rather than a library.** Hugely simplifies packaging (§6.3).
    `core/downloader.py` is the only module that knows how yt-dlp is invoked, so switching to
    the library would stay contained there.
-2. **Compiling Swift on every install** takes ~1 min and requires the Xcode Command Line Tools.
-   Solved by publishing bottles from CI; not a blocker for the formula to work.
+2. **Compiling Swift on every install** takes ~1 min and requires the Xcode Command Line Tools,
+   which Homebrew requires anyway. Bottles would remove it but cannot carry the models (§6.4),
+   so every install builds from source.
 3. **macOS 13 minimum.** Leaves Monterey out. In exchange, system audio without drivers. Given
    that development happens on macOS 26, the real cost is zero.
 4. **The output `.mov`** uses H.264 for QuickTime compatibility (consistent with the

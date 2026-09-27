@@ -29,9 +29,24 @@ Two things that follow from the design and are worth knowing before you install 
 - **Screen recording needs no extra software.** No virtual audio device to install: system
   audio is captured through Apple's ScreenCaptureKit. macOS 13 or newer.
 
-> **Status: in development.** Every command above works, but there is no Homebrew formula yet,
-> so `cinta` runs from a checkout rather than from an install. The design is in
-> [DESIGN.md](DESIGN.md).
+## Install
+
+```bash
+brew tap alexdlp/tap
+brew trust alexdlp/tap
+brew install cinta
+```
+
+The first two lines are needed once. The install downloads the Whisper models (3.1 GB), so it
+takes a few minutes; after that nothing is fetched on first use. `brew uninstall cinta`
+removes all of it, models included, and leaves only what you recorded, downloaded or
+transcribed.
+
+Recording the screen needs one permission, and macOS gives it to your terminal rather than to
+cinta: System Settings > Privacy & Security > Screen & System Audio Recording, enable your
+terminal, then restart it.
+
+The design is in [DESIGN.md](DESIGN.md).
 
 ## Development
 

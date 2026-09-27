@@ -9,6 +9,7 @@ class Cinta < Formula
   url "https://github.com/alexdlp/cinta/archive/refs/tags/v0.1.0.tar.gz"
   sha256 "7b456babd141cb3be7fff59436b03e86caaf10803ad799ea000bfdcd01cf15a3"
   license "MIT"
+  revision 1
 
   depends_on "ffmpeg"
   depends_on macos: :ventura # ScreenCaptureKit with system audio
@@ -35,8 +36,55 @@ class Cinta < Formula
            "--package-path", "swift/cintarec"
     libexec.install "swift/cintarec/.build/release/cintarec"
 
-    # cintarec is an implementation detail, kept off PATH in libexec.
-    (bin/"cinta").write_env_script libexec/"bin/cinta", CINTA_RECORDER: libexec/"cintarec"
+    install_models libexec/"models"
+
+    # cintarec is an implementation detail, kept off PATH in libexec. The
+    # models live inside the keg too, so uninstalling removes them with the rest.
+    (bin/"cinta").write_env_script libexec/"bin/cinta",
+      CINTA_RECORDER:   libexec/"cintarec",
+      CINTA_MODELS_DIR: libexec/"models"
+  end
+
+  # The Whisper models, fetched during install so that the first transcription
+  # needs nothing. Not resources: Homebrew keeps a second copy of every
+  # resource in its download cache, 3 GB that would outlive the install.
+  def models
+    {
+      "ggml-large-v3.bin"      => [
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
+        "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2",
+        "speech recognition model",
+        "3.1 GB, a few minutes",
+      ],
+      "ggml-silero-v5.1.2.bin" => [
+        "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin",
+        "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf",
+        "voice activity model",
+        "885 KB",
+      ],
+    }
+  end
+
+  def install_models(directory)
+    directory.mkpath
+    models.each do |name, (url, sha256, what, size)|
+      target = directory/name
+
+      # On upgrade the installed version is still in the Cellar. A hard link to
+      # its copy is instant and takes no space, and the file outlives the old
+      # keg when Homebrew removes it.
+      previous = Pathname.glob(HOMEBREW_CELLAR/"cinta/*/libexec/models/#{name}")
+                         .find { |path| path.sha256 == sha256 }
+      if previous
+        ohai "Keeping the Whisper #{what} from the installed version"
+        File.link previous, target
+        next
+      end
+
+      ohai "Downloading the Whisper #{what} (#{size})"
+      system "curl", "--fail", "--silent", "--show-error", "--location", "--output", target, url
+      odie "#{name} does not match its checksum" if target.sha256 != sha256
+    end
   end
 
   def caveats
@@ -44,11 +92,6 @@ class Cinta < Formula
       Screen recording: macOS grants the permission to your terminal, not to
       cinta. System Settings > Privacy & Security > Screen & System Audio
       Recording, enable your terminal, then restart it.
-
-      The Whisper models (about 3 GB) are downloaded the first time you
-      transcribe something, into ~/cinta/models. Uninstalling cinta leaves them
-      and your recordings in place. To remove everything:
-        rm -rf ~/cinta ~/.config/cinta
     EOS
   end
 
