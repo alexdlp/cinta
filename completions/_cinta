@@ -1,0 +1,99 @@
+#compdef cinta
+
+# zsh completion for cinta. The Homebrew formula installs it into
+# share/zsh/site-functions, where zsh finds it with no setup.
+# tests/unit/test_completion.py keeps it in step with the argument parser.
+
+# Screens or microphones as `cinta devices` reports them: the number, which is
+# what gets inserted, with the name alongside. Numbers rather than names
+# because names have spaces. Read with plutil, which ships with macOS, so there
+# is nothing to install.
+#
+# _arguments calls an action with its own compadd options first, so the kind
+# cannot be an argument after them: one function per kind, passing those
+# options through to _describe.
+_cinta_screens() { _cinta_devices displays "$@" }
+_cinta_microphones() { _cinta_devices microphones "$@" }
+
+_cinta_devices() {
+  local kind=$1 json count i name
+  local -a items
+  shift
+  json=$(cinta --json devices 2>/dev/null) || return 1
+  count=$(print -r -- $json | plutil -extract $kind raw -o - - 2>/dev/null) || return 1
+  for (( i = 0; i < count; i++ )); do
+    name=$(print -r -- $json | plutil -extract $kind.$i.name raw -o - -)
+    items+=("$(print -r -- $json | plutil -extract $kind.$i.index raw -o - -):${name//:/\\:}")
+  done
+  _describe -t $kind $kind items "$@"
+}
+
+_cinta() {
+  local curcontext=$curcontext state line
+  local -a commands=(
+    'record:Record a screen, with system audio and/or microphone'
+    'download:Download audio or video from a URL'
+    'transcribe:Transcribe audio or video into text'
+    'devices:List the screens and microphones available'
+  )
+
+  _arguments -C \
+    '(- *)'{-h,--help}'[show help]' \
+    '(- *)--version[show the version]' \
+    '--json[print machine-readable output]' \
+    '1: :->command' \
+    '*:: :->arguments'
+
+  case $state in
+    command)
+      _describe -t commands 'cinta command' commands
+      ;;
+    arguments)
+      case $words[1] in
+        record)
+          _arguments \
+            '(- *)'{-h,--help}'[show help]' \
+            '1::duration (30s, 5m, 1h30m; omit to record until Ctrl-C):' \
+            '--display[screen to record]:screen:_cinta_screens' \
+            '--mic[microphone to record]:microphone:_cinta_microphones' \
+            '--audio[what to record alongside the video]:audio:(system mic both none)' \
+            '(--output-dir)--output[write to this exact path]:file:_files' \
+            '(--output)--output-dir[write into this directory]:directory:_directories' \
+            '--fps[frames per second]:frames per second:' \
+            '--scale[scale the output down]:scale (0 to 1):' \
+            '--no-cursor[do not draw the mouse pointer]' \
+            '--codec[video codec]:codec:(h264 hevc)' \
+            '--force[overwrite the output if it exists]' \
+            '--transcribe[transcribe the recording when it finishes]' \
+            '--keep-tracks[with --audio both, keep the two tracks separate]'
+          ;;
+        download)
+          _arguments \
+            '(- *)'{-h,--help}'[show help]' \
+            '1:URL:_urls' \
+            '--audio[download only the audio, as MP3]' \
+            '--output-dir[write here instead of ~/cinta]:directory:_directories' \
+            '--playlist[download the whole playlist]' \
+            '--compatible[prefer H.264/MP4, which QuickTime plays]' \
+            '--transcribe[transcribe it as well]' \
+            '--format[raw yt-dlp format selector]:selector:'
+          ;;
+        transcribe)
+          _arguments \
+            '(- *)'{-h,--help}'[show help]' \
+            '--lang[spoken language, as a code like es or en]:language:' \
+            '--keep[for a URL, keep the downloaded audio]' \
+            '--output-dir[write the transcripts here]:directory:_directories' \
+            '--force[transcribe again even if a transcript exists]' \
+            '*:file or URL:_files'
+          ;;
+        devices)
+          _arguments \
+            '(- *)'{-h,--help}'[show help]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_cinta "$@"

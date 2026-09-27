@@ -36,6 +36,9 @@ class Cinta < Formula
            "--package-path", "swift/cintarec"
     libexec.install "swift/cintarec/.build/release/cintarec"
 
+    # Where zsh looks with no setup, so Tab completion works on the next shell.
+    zsh_completion.install "completions/_cinta"
+
     install_models libexec/"models"
 
     # cintarec is an implementation detail, kept off PATH in libexec. The
@@ -99,6 +102,7 @@ class Cinta < Formula
     assert_equal "cinta #{version}", shell_output("#{bin}/cinta --version").strip
     assert_equal version.to_s, shell_output("#{libexec}/cintarec --version").strip
     assert_match "transcribe", shell_output("#{bin}/cinta --help")
+    assert_path_exists zsh_completion/"_cinta"
     # Exit code 20 is cintarec rejecting its arguments, which it does before
     # asking macOS for any permission, so this runs anywhere.
     shell_output("#{libexec}/cintarec --fps 0 --output #{testpath}/x.mov 2>&1", 20)
