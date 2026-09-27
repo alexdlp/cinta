@@ -69,3 +69,37 @@ jobs:
       # --version needs no TCC permission, so it is the one thing a runner can
       # execute: it proves the binary links and starts.
       - run: swift/cintarec/.build/release/cintarec --version
+
+  # The formula against this commit rather than the published release, so a
+  # change that breaks `brew install` shows up before it is released.
+  brew:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      # See the integration job: the runner's Homebrew catalogue is stale.
+      - run: brew update --quiet
+      - name: Point the formula at this commit
+        run: |
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          tarball="$RUNNER_TEMP/cinta-$version.tar.gz"
+          git archive --format=tar.gz --prefix="cinta-$version/" -o "$tarball" HEAD
+          brew tap-new --no-git alexdlp/ci
+          python3 - "$tarball" "$(brew --repository)/Library/Taps/alexdlp/homebrew-ci/Formula/cinta.rb" <<'PY'
+          import hashlib, pathlib, re, sys
+          tarball, target = sys.argv[1:]
+          formula = pathlib.Path("packaging/homebrew/cinta.rb").read_text()
+          digest = hashlib.sha256(pathlib.Path(tarball).read_bytes()).hexdigest()
+          formula = re.sub(r'^  url ".*"\n  sha256 ".*"$', f'  url "file://{tarball}"\n  sha256 "{digest}"', formula, count=1, flags=re.M)
+          pathlib.Path(target).write_text(formula)
+          PY
+      - run: brew audit --strict alexdlp/ci/cinta
+      - run: brew install --build-from-source alexdlp/ci/cinta
+      - run: brew test alexdlp/ci/cinta
+      # Uninstalling must leave nothing behind, the 3 GB of models above all.
+      - name: Uninstall and check nothing is left
+        run: |
+          brew uninstall cinta
+          test ! -e "$(brew --prefix)/bin/cinta"
+          leftovers=$(find "$(brew --prefix)/Cellar" "$(brew --cache)" -name 'ggml-*.bin' 2>/dev/null)
+          if [ -n "$leftovers" ]; then echo "Left behind: $leftovers"; exit 1; fi

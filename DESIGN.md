@@ -704,7 +704,7 @@ same in `pyproject.toml`, `__init__.py` and `main.swift`.
 | `test` | `uv run pytest` unit tests on Python 3.11 to 3.14 |
 | `integration` | `pytest -m integration`, tools from Homebrew, the models cached between runs |
 | `swift` | `swift test` + `swift build -c release` + `cintarec --version` |
-| `brew` | `brew install --build-from-source` from the tap + `brew test` + `brew audit --strict` |
+| `brew` | the formula pointed at this commit: `brew audit --strict`, `brew install --build-from-source`, `brew test`, then `brew uninstall` and a check that no model is left |
 
 ---
 
