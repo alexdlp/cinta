@@ -6,10 +6,9 @@ class Cinta < Formula
 
   desc "Record, download and transcribe audio and video from the command-line"
   homepage "https://github.com/alexdlp/cinta"
-  url "https://github.com/alexdlp/cinta/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "7b456babd141cb3be7fff59436b03e86caaf10803ad799ea000bfdcd01cf15a3"
+  url "https://github.com/alexdlp/cinta/archive/refs/tags/v0.1.1.tar.gz"
+  sha256 "366baa105146a61ef95f4ae1c66287dc8998a3375a052d42936148b55a134838"
   license "MIT"
-  revision 1
 
   depends_on "ffmpeg"
   depends_on macos: :ventura # ScreenCaptureKit with system audio
