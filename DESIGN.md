@@ -326,6 +326,14 @@ main.swift
 
 Key pieces and their traps:
 
+- **Unattended recording**: `SleepPrevention` holds IOKit assertions against idle
+  display and system sleep from before capture starts until the file is finished.
+  Keeping the display awake also prevents the idle screen saver. Assertions are
+  released on normal completion or process exit without modifying user settings.
+  Failure to acquire them stops startup rather than silently risking a partial
+  recording. Closing the lid, manual lock/sleep and loss of power remain outside
+  this protection. Recorder write/capture errors retain their stderr detail in
+  the Python error so the cause of an interrupted recording is visible.
 - **`SCStreamConfiguration`**: `capturesAudio = true`, `sampleRate = 48000`,
   `channelCount = 2`, `excludesCurrentProcessAudio = true`, `showsCursor`,
   `minimumFrameInterval = CMTime(value: 1, timescale: fps)`, `width`/`height` scaled by

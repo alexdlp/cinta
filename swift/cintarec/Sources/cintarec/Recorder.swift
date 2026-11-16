@@ -39,6 +39,17 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
             microphone = Microphones.device(matching: options.mic)
         }
 
+        // Acquire before starting capture, and keep the assertions through
+        // finishWriting(). Display sleep can interrupt ScreenCaptureKit even
+        // when system audio is still playing.
+        let sleepPrevention: SleepPrevention
+        do {
+            sleepPrevention = try SleepPrevention()
+        } catch {
+            fail(.writeFailure, error.localizedDescription)
+        }
+        defer { sleepPrevention.release() }
+
         let writer = Writer(
             output: options.output,
             width: configuration.width,

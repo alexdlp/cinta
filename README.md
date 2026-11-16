@@ -22,6 +22,12 @@ cinta transcribe "https://youtu.be/VIDEO"              # fetch the audio, keep o
 cinta record --transcribe                              # record, then transcribe it
 ```
 
+For a long class, use `cinta record 3h30m` (or omit the duration and press Enter
+when it ends). During recording, cinta prevents the idle screen saver, display
+sleep and system sleep, then releases that protection when it finishes. Your
+normal settings are preserved. Keep the Mac plugged in and its lid open;
+manual locking or sleep can still interrupt screen capture.
+
 Two things that follow from the design and are worth knowing before you install it:
 
 - **Transcription runs on your machine.** `whisper.cpp` works offline; no audio is uploaded

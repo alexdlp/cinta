@@ -10,6 +10,7 @@ It needs the recorder built (`make build-swift`).
 """
 
 import json
+import re
 import signal
 import subprocess
 import sys
@@ -54,14 +55,39 @@ def test_three_seconds_of_screen(tmp_path, audio, audio_tracks):
     assert all(stream["codec_name"] == "aac" for stream in sound)
 
 
-@pytest.mark.parametrize("stop_with", [signal.SIGINT, signal.SIGTERM])
+def recording_power_assertions() -> dict[str, str]:
+    result = subprocess.run(
+        ["/usr/bin/pmset", "-g", "assertions"], check=True, capture_output=True, text=True
+    )
+    return {
+        match[1]: line
+        for line in result.stdout.splitlines()
+        if 'named: "cinta screen recording"' in line
+        and (match := re.search(r"\[(0x[0-9a-f]+)\]", line))
+    }
+
+
+@pytest.mark.parametrize("stop_with", [None, signal.SIGINT, signal.SIGTERM])
 def test_driven_by_a_program(tmp_path, stop_with):
     """The way another tool drives cinta: start it, wait for the "started" line
     before playing anything, signal cinta alone (not its process group), and
     read the report from the "finished" line. The file must play."""
     output = tmp_path / "driven.mov"
+    before = recording_power_assertions()
+    arguments = ["3s"] if stop_with is None else []
     process = subprocess.Popen(
-        [sys.executable, "-m", "cinta", "--json", "record", "--audio", "none", "--output", output],
+        [
+            sys.executable,
+            "-m",
+            "cinta",
+            "--json",
+            "record",
+            *arguments,
+            "--audio",
+            "none",
+            "--output",
+            output,
+        ],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -73,15 +99,28 @@ def test_driven_by_a_program(tmp_path, stop_with):
         assert started["path"] == str(output)
         began = time.monotonic()
 
+        during = recording_power_assertions()
+        acquired = during.keys() - before.keys()
+        assert len(acquired) == 2
+        assert any("PreventUserIdleDisplaySleep" in during[key] for key in acquired)
+        assert any("PreventUserIdleSystemSleep" in during[key] for key in acquired)
+
         time.sleep(2)
-        process.send_signal(stop_with)
+        if stop_with is not None:
+            process.send_signal(stop_with)
         finished = json.loads(process.stdout.readline())
         assert process.wait(timeout=15) == 0
     finally:
         if process.poll() is None:
-            process.kill()
+            process.send_signal(signal.SIGINT)
+            try:
+                process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
 
     assert finished["event"] == "finished"
-    assert finished["stoppedBy"] == "signal"
+    assert finished["stoppedBy"] == ("duration" if stop_with is None else "signal")
+    assert not (acquired & recording_power_assertions().keys())
     # The file starts at the "started" line, so its length is the time since.
     assert duration(output) == pytest.approx(time.monotonic() - began, abs=0.6)
