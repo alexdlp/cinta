@@ -67,6 +67,21 @@ def test_unknown_exit_code_surfaces_the_recorder_log(monkeypatch, tmp_path):
     assert "something broke" in error.value.message
 
 
+def test_capture_failure_surfaces_the_reason(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "CINTA_RECORDER",
+        str(
+            fake_recorder(
+                tmp_path, exit_code=13, stderr="the capture stream failed: display asleep"
+            )
+        ),
+    )
+    with pytest.raises(CintaError) as error:
+        external.run_recorder([])
+    assert error.value.exit_code == 13
+    assert "display asleep" in error.value.message
+
+
 def test_output_that_is_not_json_is_an_error(monkeypatch, tmp_path):
     monkeypatch.setenv("CINTA_RECORDER", str(fake_recorder(tmp_path, stdout="not json")))
     with pytest.raises(CintaError) as error:

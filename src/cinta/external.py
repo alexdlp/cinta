@@ -183,7 +183,7 @@ def run_recorder(arguments: list[str], on_started=None) -> dict:
             process.returncode, (f"The recorder failed (exit code {process.returncode}).", None)
         )
         detail = (stderr or "").strip()
-        if detail and process.returncode not in RECORDER_EXIT_CODES:
+        if detail and (process.returncode == 13 or process.returncode not in RECORDER_EXIT_CODES):
             message = f"{message}\n{detail}"
         raise CintaError(message, exit_code=process.returncode, hint=hint)
 
